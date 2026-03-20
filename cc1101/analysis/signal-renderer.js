@@ -44,7 +44,12 @@ function renderPulseTrack(units, levels = [], maxSteps = 48) {
     const rawUnit = units[i];
     const unit = rawUnit === null || rawUnit === undefined ? 1 : Math.max(1, Number(rawUnit));
     const level = Number(levels[i] ?? (i % 2 === 0 ? 1 : 0));
-    const width = Math.max(1, Math.min(unit, 6));
+    const width =
+      rawUnit === null || rawUnit === undefined ? 1 :
+      unit <= 1 ? 1 :
+      unit <= 3 ? 2 :
+      unit <= 6 ? 3 :
+      4;
     const glyph = rawUnit === null || rawUnit === undefined ? "·" : (level ? "▀" : "▄");
     const color =
       rawUnit === null || rawUnit === undefined ? COLOR.dim :
@@ -55,7 +60,7 @@ function renderPulseTrack(units, levels = [], maxSteps = 48) {
 
     parts.push(paint(color, glyph.repeat(width)));
     if (i < units.length - 1) {
-      parts.push(paint(COLOR.dim, "|"));
+      parts.push(paint(COLOR.dim, " "));
     }
   }
 
