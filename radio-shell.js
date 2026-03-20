@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const blessed = require("blessed");
+const readline = require("readline");
 const { CC1101ProtocolDetector } = require("./cc1101/analysis/protocol-detector");
 const { CC1101ProtocolListener } = require("./cc1101/analysis/protocol-listener");
 const { CC1101RawListener } = require("./cc1101/analysis/raw-listener");
@@ -42,61 +42,6 @@ const MARCSTATE_MAP = {
   0x13: "TX",
   0x16: "TX_UNDERFLOW",
 };
-
-const COMMAND_GROUPS = [
-  {
-    label: "Core",
-    commands: ["help", "connect [bus] [device] [speedHz]", "disconnect", "reset", "info", "status"],
-  },
-  {
-    label: "Config",
-    commands: [
-      "config show",
-      "config set <packet|direct_async> [band] [modulation]",
-      "gpio set [gdo0] [gdo2] [gdo1]",
-      "idle",
-    ],
-  },
-  {
-    label: "Packet",
-    commands: ["listen start [pollMs]", "listen stop", "rssi [count] [intervalMs]", "tx <hex-bytes...>"],
-  },
-  {
-    label: "Analysis",
-    commands: [
-      "live view [gdo0] [gdo2] [threshold] [windowMs]",
-      "raw listen [gpio] [threshold] [captureMs]",
-      "signal detect [gdo0] [threshold] [lookbackMs] [settleMs]",
-      "timing fixed [gdo0] [threshold] [baseUs] [lookbackMs]",
-      "segment collect [gdo0] [threshold] [baseUs] [lookbackMs]",
-      "burst match [gpio] [silenceGapUs] [minEdges] [baseUnitUs]",
-      "canonical build [gpio] [silenceGapUs] [minEdges] [baseUnitUs]",
-      "stabilize frame [gdo0] [threshold] [baseUs] [lookbackMs]",
-      "consensus start [gdo0] [threshold] [baseUs] [beforeMs] [afterMs]",
-      "slice inspect [gdo0] [threshold] [baseUs] [beforeMs] [afterMs]",
-      "frame extract [gdo0] [gdo2] [threshold] [silenceGapUs] [minEdges]",
-    ],
-  },
-  {
-    label: "Capture",
-    commands: [
-      "capture save [gdo0] [threshold] [baseUs] [beforeMs] [afterMs] [outDir]",
-      "capture show <file>",
-      "capture replay <file> [gpio] [mode] [repeats] [baseUs]",
-      "window capture [gdo0] [threshold] [baseUs] [beforeMs] [afterMs] [outDir]",
-      "window replay <file> [gpio] [mode] [repeats] [baseUs]",
-    ],
-  },
-  {
-    label: "Protocol",
-    commands: [
-      "protocol detect [gdo0] [threshold] [baseUs]",
-      "protocol listen [name] [gdo0] [threshold] [baseUs] [tolerance]",
-      "protocol stop",
-      "exit",
-    ],
-  },
-];
 
 function createDefaultRadioConfig() {
   return {
@@ -997,72 +942,27 @@ async function executeCommand(shell, line, onExit) {
   }
 }
 
-function createCommandReference() {
-  return COMMAND_GROUPS.map((group) => {
-    const body = group.commands.map((command) => ` {gray-fg}•{/gray-fg} ${command}`).join("\n");
-    return `{bold}${group.label}{/bold}\n${body}`;
-  }).join("\n\n");
-}
-
 function createStatusText(shell) {
   const config = shell.radioConfig;
-  const runtime = shell.listening ? "packet listen" : shell.protocolRuntime ? "analysis runtime" : "idle";
+  const runtime = shell.listening ? "packet-listen" : shell.protocolRuntime ? "analysis-runtime" : "idle";
   const transport = shell.radio ? "connected" : "disconnected";
 
   return [
-    `{bold}${transport}{/bold}`,
-    `bus     ${shell.bus}`,
-    `device  ${shell.device}`,
-    `speed   ${shell.speedHz}`,
-    "",
-    `{bold}mode{/bold}`,
-    `radio   ${config.mode}`,
-    `band    ${config.band}`,
-    `mod     ${config.modulation}`,
-    `state   ${runtime}`,
-  ].join("\n");
+    `link=${transport}`,
+    `bus=${shell.bus}`,
+    `device=${shell.device}`,
+    `speed=${shell.speedHz}`,
+    `mode=${config.mode}`,
+    `band=${config.band}`,
+    `mod=${config.modulation}`,
+    `state=${runtime}`,
+  ].join("  ");
 }
 
-function attachConsole(screen, logBox) {
-  const originals = {
-    log: console.log,
-    error: console.error,
-    warn: console.warn,
-  };
-
-  const renderLine = (level, args) => {
-    const message = args
-      .map((value) => {
-        if (typeof value === "string") return value;
-        try {
-          return JSON.stringify(value, null, 2);
-        } catch {
-          return String(value);
-        }
-      })
-      .join(" ");
-
-    if (!message) return;
-
-    const style =
-      level === "error" ? "{red-fg}" :
-      level === "warn" ? "{yellow-fg}" :
-      "{white-fg}";
-
-    logBox.pushLine(`${style}${message}{/${style.slice(1)}`);
-    logBox.setScrollPerc(100);
-    screen.render();
-  };
-
-  console.log = (...args) => renderLine("log", args);
-  console.error = (...args) => renderLine("error", args);
-  console.warn = (...args) => renderLine("warn", args);
-
-  return () => {
-    console.log = originals.log;
-    console.error = originals.error;
-    console.warn = originals.warn;
-  };
+function printBanner(shell) {
+  console.log("CC1101 shell");
+  console.log("Ctrl+C interrupts active listen/runtime. Use `exit` or `quit` to close.");
+  console.log(createStatusText(shell));
 }
 
 async function main() {
@@ -1071,145 +971,30 @@ async function main() {
   const device = Number(args.device ?? 0);
   const speedHz = Number(args.speed ?? 100000);
   const shell = new RadioShell({ bus, device, speedHz });
-
-  const screen = blessed.screen({
-    smartCSR: true,
-    fullUnicode: true,
-    title: "CC1101 Control Surface",
-  });
-
-  const header = blessed.box({
-    parent: screen,
-    top: 0,
-    left: 0,
-    width: "100%",
-    height: 3,
-    tags: true,
-    padding: { left: 1, right: 1 },
-    style: {
-      fg: "white",
-      bg: "#12343b",
-    },
-    content: "{bold}CC1101 Control Surface{/bold}  {gray-fg}Enter runs command, Ctrl+C interrupts active listen/runtime, exit closes shell{/gray-fg}",
-  });
-
-  const statusBox = blessed.box({
-    parent: screen,
-    top: 3,
-    left: 0,
-    width: "28%",
-    height: "70%",
-    label: " Status ",
-    tags: true,
-    border: "line",
-    padding: { left: 1, right: 1 },
-    style: {
-      fg: "white",
-      border: { fg: "#3fa7d6" },
-      label: { fg: "#9bd1e5" },
-    },
-  });
-
-  const commandBox = blessed.box({
-    parent: screen,
-    top: 3,
-    left: "28%",
-    width: "72%",
-    height: "28%",
-    label: " Command Map ",
-    tags: true,
-    border: "line",
-    scrollable: true,
-    alwaysScroll: true,
-    keys: true,
-    vi: true,
-    padding: { left: 1, right: 1 },
-    style: {
-      fg: "white",
-      border: { fg: "#7d5ba6" },
-      label: { fg: "#c6b5e9" },
-    },
-    content: createCommandReference(),
-  });
-
-  const logBox = blessed.log({
-    parent: screen,
-    top: "31%",
-    left: "28%",
-    width: "72%",
-    height: "52%",
-    label: " Radio Log ",
-    tags: true,
-    border: "line",
-    scrollable: true,
-    alwaysScroll: true,
-    keys: true,
-    mouse: true,
-    vi: true,
-    padding: { left: 1, right: 1 },
-    scrollbar: {
-      ch: " ",
-      track: { bg: "#1f2d3d" },
-      style: { inverse: true },
-    },
-    style: {
-      fg: "white",
-      border: { fg: "#f2a65a" },
-      label: { fg: "#ffd6a5" },
-    },
-  });
-
-  const inputLabel = blessed.box({
-    parent: screen,
-    bottom: 3,
-    left: 0,
-    width: "100%",
-    height: 3,
-    tags: true,
-    style: {
-      fg: "white",
-      bg: "#162129",
-    },
-    padding: { left: 1, right: 1 },
-    content: "{bold}Command{/bold}  {gray-fg}Examples: listen start 20 | tx aa 55 01 | protocol listen ev1527_like{/gray-fg}",
-  });
-
-  const input = blessed.textbox({
-    parent: screen,
-    bottom: 0,
-    left: 0,
-    width: "100%",
-    height: 3,
-    inputOnFocus: true,
-    border: "line",
-    padding: { left: 1, right: 1 },
-    style: {
-      fg: "white",
-      bg: "#0f1a20",
-      border: { fg: "#3fa7d6" },
-      focus: {
-        border: { fg: "#f2a65a" },
-      },
-    },
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    prompt: "cc1101> ",
+    historySize: 200,
   });
 
   let shuttingDown = false;
   let interrupting = false;
-  const restoreConsole = attachConsole(screen, logBox);
-  const commandHistory = [];
-  let historyIndex = 0;
 
-  const refresh = () => {
-    statusBox.setContent(createStatusText(shell));
-    screen.render();
+  const prompt = () => {
+    if (!shuttingDown) {
+      rl.prompt();
+    }
+  };
+
+  const printStatus = () => {
+    console.log(createStatusText(shell));
   };
 
   const closeShell = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
-    restoreConsole();
     await shell.disconnect().catch(() => {});
-    screen.destroy();
     process.exit(0);
   };
 
@@ -1227,33 +1012,10 @@ async function main() {
       }
     } finally {
       interrupting = false;
-      refresh();
-      input.focus();
-      screen.render();
+      printStatus();
+      prompt();
     }
   };
-
-  input.key("up", () => {
-    if (!commandHistory.length) return;
-    historyIndex = Math.max(0, historyIndex - 1);
-    input.setValue(commandHistory[historyIndex] ?? "");
-    screen.render();
-  });
-
-  input.key("down", () => {
-    if (!commandHistory.length) return;
-    historyIndex = Math.min(commandHistory.length, historyIndex + 1);
-    input.setValue(commandHistory[historyIndex] ?? "");
-    screen.render();
-  });
-
-  input.key("C-c", () => {
-    void handleInterrupt();
-  });
-
-  screen.key(["C-c"], () => {
-    void handleInterrupt();
-  });
 
   process.on("SIGINT", () => {
     void handleInterrupt();
@@ -1263,47 +1025,39 @@ async function main() {
     void closeShell();
   });
 
-  input.on("submit", async (value) => {
+  rl.on("line", async (value) => {
     const line = value.trim();
-    input.clearValue();
-
-    if (!line) {
-      screen.render();
-      return;
-    }
-
-    commandHistory.push(line);
-    historyIndex = commandHistory.length;
-    console.log(`> ${line}`);
-
     try {
-      await executeCommand(shell, line, () => {
-        void closeShell();
-      });
+      await executeCommand(shell, line, () => void closeShell());
     } catch (error) {
       console.error(error.message);
     } finally {
-      refresh();
-      input.focus();
-      screen.render();
-      input.readInput();
+      if (line) {
+        printStatus();
+      }
+      prompt();
     }
   });
 
-  screen.on("resize", refresh);
+  rl.on("SIGINT", () => {
+    void handleInterrupt();
+  });
+
+  rl.on("close", () => {
+    if (!shuttingDown) {
+      void closeShell();
+    }
+  });
 
   try {
     await shell.connect();
-    console.log("interactive shell ready");
-    console.log("use the command map on the right; only `exit` or `quit` closes the shell");
+    printBanner(shell);
   } catch (error) {
     console.error(`startup failed: ${error.message}`);
+    printBanner(shell);
   }
 
-  refresh();
-  input.focus();
-  screen.render();
-  input.readInput();
+  prompt();
 }
 
 main().catch((error) => {
