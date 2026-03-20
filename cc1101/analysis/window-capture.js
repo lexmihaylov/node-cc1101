@@ -210,8 +210,8 @@ class CC1101WindowCapture {
       modulation: MODULATION.OOK,
       mode: RADIO_MODE.DIRECT_ASYNC,
       gpio: {
-        gdo0: VALUE.IOCFG.HIGH_IMPEDANCE,
-        gdo2: VALUE.IOCFG.ASYNC_SERIAL_DATA,
+        gdo0: VALUE.IOCFG.ASYNC_SERIAL_DATA,
+        gdo2: VALUE.IOCFG.PQI,
       },
       packet: {
         appendStatus: false,
@@ -220,7 +220,7 @@ class CC1101WindowCapture {
     await sleep(100);
 
     this.options.onMessage(
-      `window capture started rxDataGpio=${this.options.rxDataGpio} cc1101DataGdo=gdo2 threshold=${this.options.threshold} baseUs=${this.options.baseUs} beforeMs=${this.options.beforeMs} afterMs=${this.options.afterMs} outDir=${this.options.outDir}`
+      `window capture started rxDataGpio=${this.options.rxDataGpio} cc1101DataGdo=gdo0 cc1101AuxGdo=gdo2:pqi threshold=${this.options.threshold} baseUs=${this.options.baseUs} beforeMs=${this.options.beforeMs} afterMs=${this.options.afterMs} outDir=${this.options.outDir}`
     );
 
     this.rxDataPin.on("alert", (level, tick) => this.handleAlert(level, tick));

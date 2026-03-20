@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-const ansiEscapes = require("ansi-escapes");
 const readline = require("readline");
 const { CC1101ProtocolDetector } = require("./cc1101/analysis/protocol-detector");
 const { CC1101ProtocolListener } = require("./cc1101/analysis/protocol-listener");
@@ -42,6 +41,16 @@ const MARCSTATE_MAP = {
   0x11: "RX_OVERFLOW",
   0x13: "TX",
   0x16: "TX_UNDERFLOW",
+};
+
+const COLOR = {
+  reset: "\u001b[0m",
+  dim: "\u001b[2m",
+  cyan: "\u001b[36m",
+  blue: "\u001b[34m",
+  green: "\u001b[32m",
+  yellow: "\u001b[33m",
+  magenta: "\u001b[35m",
 };
 
 function createDefaultRadioConfig() {
@@ -301,7 +310,7 @@ class RadioShell {
       ),
       gdo2: parseGdoSignal(
         gdo2,
-        this.radioConfig.gpio.gdo2 ?? GDO_SIGNAL.HIGH_IMPEDANCE
+        this.radioConfig.gpio.gdo2 ?? GDO_SIGNAL.PQI
       ),
       gdo1: parseGdoSignal(
         gdo1,
@@ -960,93 +969,30 @@ function createStatusText(shell) {
   ].join("  ");
 }
 
-function createStatusLines(shell) {
+function colorizeStatus(shell) {
+  const config = shell.radioConfig;
+  const transport = shell.radio ? `${COLOR.green}connected${COLOR.reset}` : `${COLOR.yellow}disconnected${COLOR.reset}`;
+  const runtime = shell.listening
+    ? `${COLOR.magenta}packet-listen${COLOR.reset}`
+    : shell.protocolRuntime
+      ? `${COLOR.magenta}analysis-runtime${COLOR.reset}`
+      : `${COLOR.dim}idle${COLOR.reset}`;
+
   return [
-    "CC1101 shell  |  Ctrl+C interrupts active runtime  |  exit closes shell",
-    createStatusText(shell),
-  ];
+    `${COLOR.cyan}CC1101${COLOR.reset} ${COLOR.dim}| Ctrl+C interrupts | exit closes shell${COLOR.reset}`,
+    `${COLOR.blue}link${COLOR.reset}=${transport}  ` +
+      `${COLOR.blue}bus${COLOR.reset}=${shell.bus}  ` +
+      `${COLOR.blue}dev${COLOR.reset}=${shell.device}  ` +
+      `${COLOR.blue}speed${COLOR.reset}=${shell.speedHz}  ` +
+      `${COLOR.blue}mode${COLOR.reset}=${config.mode}  ` +
+      `${COLOR.blue}band${COLOR.reset}=${config.band}  ` +
+      `${COLOR.blue}mod${COLOR.reset}=${config.modulation}  ` +
+      `${COLOR.blue}state${COLOR.reset}=${runtime}`,
+  ].join("\n");
 }
 
-function createDashboard({ shell, logLines, inputLine }) {
-  const width = process.stdout.columns || 120;
-  const height = process.stdout.rows || 24;
-  const statusLines = createStatusLines(shell);
-  const separator = "-".repeat(Math.max(24, Math.min(width, 120)));
-  const availableLogRows = Math.max(4, height - statusLines.length - 4);
-  const visibleLogs = logLines.slice(-availableLogRows);
-  const lines = [
-    ...statusLines.map((line) => line.slice(0, width)),
-    separator.slice(0, width),
-    ...visibleLogs.map((line) => line.slice(0, width)),
-    "",
-    `cc1101> ${inputLine}`.slice(0, width),
-  ];
-
-  return lines.join("\n");
-}
-
-function attachConsole(shell, rl) {
-  const originals = {
-    log: console.log,
-    error: console.error,
-    warn: console.warn,
-  };
-  const logLines = [];
-  let scheduled = false;
-
-  const render = () => {
-    scheduled = false;
-    const dashboard = createDashboard({
-      shell,
-      logLines,
-      inputLine: rl.line ?? "",
-    });
-
-    process.stdout.write(ansiEscapes.eraseScreen);
-    process.stdout.write(ansiEscapes.cursorTo(0, 0));
-    process.stdout.write(dashboard);
-  };
-
-  const scheduleRender = () => {
-    if (scheduled) return;
-    scheduled = true;
-    setImmediate(render);
-  };
-
-  const pushLog = (prefix, args) => {
-    const message = args
-      .map((value) => {
-        if (typeof value === "string") return value;
-        try {
-          return JSON.stringify(value, null, 2);
-        } catch {
-          return String(value);
-        }
-      })
-      .join(" ");
-
-    const rows = `${prefix}${message}`.split("\n");
-    logLines.push(...rows);
-    if (logLines.length > 500) {
-      logLines.splice(0, logLines.length - 500);
-    }
-    scheduleRender();
-  };
-
-  console.log = (...args) => pushLog("", args);
-  console.error = (...args) => pushLog("[error] ", args);
-  console.warn = (...args) => pushLog("[warn] ", args);
-
-  return {
-    render: scheduleRender,
-    restore: () => {
-      console.log = originals.log;
-      console.error = originals.error;
-      console.warn = originals.warn;
-      process.stdout.write(ansiEscapes.eraseScreen);
-      process.stdout.write(ansiEscapes.cursorTo(0, 0));
-    },
-  };
+function buildPrompt(shell) {
+  return `${colorizeStatus(shell)}\n${COLOR.cyan}cc1101>${COLOR.reset} `;
 }
 
 async function main() {
@@ -1058,24 +1004,22 @@ async function main() {
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
-    prompt: "cc1101> ",
     historySize: 200,
   });
-  readline.emitKeypressEvents(process.stdin, rl);
 
   let shuttingDown = false;
   let interrupting = false;
-  const ui = attachConsole(shell, rl);
-  process.stdout.write(ansiEscapes.enterAlternativeScreen);
-  process.stdout.write(ansiEscapes.cursorHide);
+
+  const prompt = () => {
+    if (shuttingDown) return;
+    rl.setPrompt(buildPrompt(shell));
+    rl.prompt();
+  };
 
   const closeShell = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
     await shell.disconnect().catch(() => {});
-    ui.restore();
-    process.stdout.write(ansiEscapes.cursorShow);
-    process.stdout.write(ansiEscapes.leaveAlternativeScreen);
     process.exit(0);
   };
 
@@ -1093,7 +1037,7 @@ async function main() {
       }
     } finally {
       interrupting = false;
-      ui.render();
+      prompt();
     }
   };
 
@@ -1112,24 +1056,12 @@ async function main() {
     } catch (error) {
       console.error(error.message);
     } finally {
-      ui.render();
+      prompt();
     }
   });
 
   rl.on("SIGINT", () => {
     void handleInterrupt();
-  });
-
-  process.stdin.on("keypress", () => {
-    ui.render();
-  });
-
-  rl.on("history", () => {
-    ui.render();
-  });
-
-  process.stdout.on("resize", () => {
-    ui.render();
   });
 
   rl.on("close", () => {
@@ -1145,7 +1077,7 @@ async function main() {
     console.error(`startup failed: ${error.message}`);
   }
 
-  ui.render();
+  prompt();
 }
 
 main().catch((error) => {

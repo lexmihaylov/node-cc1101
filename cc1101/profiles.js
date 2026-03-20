@@ -218,7 +218,7 @@ function getDirectAsyncPreset({
   modulation = MODULATION.OOK,
   packetControl1 = VALUE.PKTCTRL1.NO_ADDRESS_CHECK,
   gdo0 = VALUE.IOCFG.ASYNC_SERIAL_DATA,
-  gdo2 = VALUE.IOCFG.HIGH_IMPEDANCE,
+  gdo2 = VALUE.IOCFG.PQI,
   gdo1 = VALUE.IOCFG.HIGH_IMPEDANCE,
   agcCtrl2 = VALUE.AGCCTRL2.MAX_DVGA_GAIN,
 } = {}) {
@@ -417,7 +417,7 @@ function buildRadioConfig(options = {}) {
       ),
       gdo0: resolveGdoSignal(gpio.gdo0, GDO_SIGNAL.ASYNC_SERIAL_DATA),
       gdo1: resolveGdoSignal(gpio.gdo1, GDO_SIGNAL.HIGH_IMPEDANCE),
-      gdo2: resolveGdoSignal(gpio.gdo2, GDO_SIGNAL.HIGH_IMPEDANCE),
+      gdo2: resolveGdoSignal(gpio.gdo2, GDO_SIGNAL.PQI),
       agcCtrl2: options.agcCtrl2,
     });
   } else {
