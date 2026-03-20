@@ -177,6 +177,11 @@ cc1101> capture save 24 100 400 1000 1000 /tmp/rf-captures
 cc1101> capture replay /tmp/rf-captures/capture-001.json 24 normalized 10 400
 ```
 
+Capture/replay wiring:
+
+- Capture: `CC1101 async-data GDO output -> Raspberry Pi input GPIO`
+- Replay: `Raspberry Pi output GPIO -> CC1101 async TX data input`
+
 ### Main shell commands
 
 - `connect [bus] [device] [speedHz]`
@@ -200,9 +205,9 @@ cc1101> capture replay /tmp/rf-captures/capture-001.json 24 normalized 10 400
 - `consensus start [gdo0] [threshold] [baseUs] [beforeMs] [afterMs]`
 - `slice inspect [gdo0] [threshold] [baseUs] [beforeMs] [afterMs]`
 - `frame extract [gdo0] [gdo2] [threshold] [silenceGapUs] [minEdges]`
-- `capture save [gdo0] [threshold] [baseUs] [beforeMs] [afterMs] [outDir]`
+- `capture save [rxDataGpio] [threshold] [baseUs] [beforeMs] [afterMs] [outDir]`
 - `capture show <file>`
-- `capture replay <file> [gpio] [mode] [repeats] [baseUs]`
+- `capture replay <file> [txDataGpio] [mode] [repeats] [baseUs]`
 - `protocol detect [gdo0] [threshold] [baseUs]`
 - `protocol listen [name] [gdo0] [threshold] [baseUs] [tolerance]`
 - `protocol stop`

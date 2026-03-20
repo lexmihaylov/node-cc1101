@@ -89,9 +89,9 @@ Unless you override them in a command, the shell generally assumes:
 - `consensus start [gdo0] [threshold] [baseUs] [beforeMs] [afterMs]`
 - `slice inspect [gdo0] [threshold] [baseUs] [beforeMs] [afterMs]`
 - `frame extract [gdo0] [gdo2] [threshold] [silenceGapUs] [minEdges]`
-- `capture save [gdo0] [threshold] [baseUs] [beforeMs] [afterMs] [outDir]`
+- `capture save [rxDataGpio] [threshold] [baseUs] [beforeMs] [afterMs] [outDir]`
 - `capture show <file>`
-- `capture replay <file> [gpio] [mode] [repeats] [baseUs]`
+- `capture replay <file> [txDataGpio] [mode] [repeats] [baseUs]`
 - `protocol detect [gdo0] [threshold] [baseUs]`
 - `protocol listen [name] [gdo0] [threshold] [baseUs] [tolerance]`
 - `protocol stop`
@@ -600,13 +600,13 @@ cc1101> frame extract 24 25 100 8000 12
 
 ## Capture and replay
 
-### `capture save [gdo0] [threshold] [baseUs] [beforeMs] [afterMs] [outDir]`
+### `capture save [rxDataGpio] [threshold] [baseUs] [beforeMs] [afterMs] [outDir]`
 
 Captures a trigger window and writes it to disk as a JSON capture file.
 
 Arguments:
 
-- `gdo0`: GPIO pin, default `24`
+- `rxDataGpio`: Raspberry Pi input GPIO receiving the CC1101 async data output, default `24`
 - `threshold`: RSSI trigger threshold, default `100`
 - `baseUs`: quantization base, default `400`
 - `beforeMs`: pre-trigger capture window, default `1000`
@@ -629,14 +629,14 @@ Example:
 cc1101> capture show /tmp/rf-captures/capture-001.json
 ```
 
-### `capture replay <file> [gpio] [mode] [repeats] [baseUs]`
+### `capture replay <file> [txDataGpio] [mode] [repeats] [baseUs]`
 
 Loads a capture file and replays it via GPIO.
 
 Arguments:
 
 - `file`: capture JSON path
-- `gpio`: output GPIO, default `24`
+- `txDataGpio`: Raspberry Pi output GPIO driving the CC1101 async TX data input, default `24`
 - `mode`: `normalized` or `raw`, default `normalized`
 - `repeats`: number of repeats, default `10`
 - `baseUs`: optional override base timing for normalized replay
@@ -651,6 +651,12 @@ Notes:
 
 - Replay timing in Node.js is best-effort and subject to OS jitter.
 - Use with caution around real RF devices.
+
+Wiring model:
+
+- Capture path: `CC1101 GDO async-data output -> Raspberry Pi input GPIO (rxDataGpio)`
+- Replay path: `Raspberry Pi output GPIO (txDataGpio) -> CC1101 async TX data input`
+- These are different directions, even if you choose the same GPIO number in separate test setups.
 
 ## Typical workflows
 

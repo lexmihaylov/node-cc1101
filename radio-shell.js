@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+const ansiEscapes = require("ansi-escapes");
 const readline = require("readline");
 const { CC1101ProtocolDetector } = require("./cc1101/analysis/protocol-detector");
 const { CC1101ProtocolListener } = require("./cc1101/analysis/protocol-listener");
@@ -193,11 +194,11 @@ class RadioShell {
     console.log("  consensus start [gdo0] [threshold] [baseUs] [beforeMs] [afterMs]");
     console.log("  slice inspect [gdo0] [threshold] [baseUs] [beforeMs] [afterMs]");
     console.log("  frame extract [gdo0] [gdo2] [threshold] [silenceGapUs] [minEdges]");
-    console.log("  capture save [gdo0] [threshold] [baseUs] [beforeMs] [afterMs] [outDir]");
+    console.log("  capture save [rxDataGpio] [threshold] [baseUs] [beforeMs] [afterMs] [outDir]");
     console.log("  capture show <file>");
-    console.log("  capture replay <file> [gpio] [mode] [repeats] [baseUs]");
-    console.log("  window capture [gdo0] [threshold] [baseUs] [beforeMs] [afterMs] [outDir]");
-    console.log("  window replay <file> [gpio] [mode] [repeats] [baseUs]");
+    console.log("  capture replay <file> [txDataGpio] [mode] [repeats] [baseUs]");
+    console.log("  window capture [rxDataGpio] [threshold] [baseUs] [beforeMs] [afterMs] [outDir]");
+    console.log("  window replay <file> [txDataGpio] [mode] [repeats] [baseUs]");
     console.log("  protocol detect [gdo0] [threshold] [baseUs]");
     console.log("  protocol listen [name] [gdo0] [threshold] [baseUs] [tolerance]");
     console.log("  protocol stop");
@@ -635,7 +636,7 @@ class RadioShell {
   }
 
   async startWindowCapture(
-    gdo0 = 24,
+    rxDataGpio = 24,
     threshold = 100,
     baseUs = 400,
     beforeMs = 1000,
@@ -650,7 +651,7 @@ class RadioShell {
       bus: this.bus,
       device: this.device,
       speedHz: this.speedHz,
-      gdo0: Number(gdo0),
+      rxDataGpio: Number(rxDataGpio),
       threshold: Number(threshold),
       baseUs: Number(baseUs),
       beforeMs: Number(beforeMs),
@@ -664,11 +665,11 @@ class RadioShell {
     await this.protocolRuntime.start();
   }
 
-  async saveCapture(gdo0 = 24, threshold = 100, baseUs = 400, beforeMs = 1000, afterMs = 1000, outDir = "/tmp/rf-captures") {
-    await this.startWindowCapture(gdo0, threshold, baseUs, beforeMs, afterMs, outDir);
+  async saveCapture(rxDataGpio = 24, threshold = 100, baseUs = 400, beforeMs = 1000, afterMs = 1000, outDir = "/tmp/rf-captures") {
+    await this.startWindowCapture(rxDataGpio, threshold, baseUs, beforeMs, afterMs, outDir);
   }
 
-  async replayWindow(file, gpio = 24, mode = "normalized", repeats = 10, baseUs) {
+  async replayWindow(file, txDataGpio = 24, mode = "normalized", repeats = 10, baseUs) {
     if (!file) {
       throw new Error("window replay requires a capture file path");
     }
@@ -687,7 +688,7 @@ class RadioShell {
       bus: this.bus,
       device: this.device,
       speedHz: this.speedHz,
-      gpio: Number(gpio),
+      txDataGpio: Number(txDataGpio),
       repeats: Number(repeats),
       onMessage: (message) => {
         console.log(`[replay] ${message}`);
@@ -959,10 +960,93 @@ function createStatusText(shell) {
   ].join("  ");
 }
 
-function printBanner(shell) {
-  console.log("CC1101 shell");
-  console.log("Ctrl+C interrupts active listen/runtime. Use `exit` or `quit` to close.");
-  console.log(createStatusText(shell));
+function createStatusLines(shell) {
+  return [
+    "CC1101 shell  |  Ctrl+C interrupts active runtime  |  exit closes shell",
+    createStatusText(shell),
+  ];
+}
+
+function createDashboard({ shell, logLines, inputLine }) {
+  const width = process.stdout.columns || 120;
+  const height = process.stdout.rows || 24;
+  const statusLines = createStatusLines(shell);
+  const separator = "-".repeat(Math.max(24, Math.min(width, 120)));
+  const availableLogRows = Math.max(4, height - statusLines.length - 4);
+  const visibleLogs = logLines.slice(-availableLogRows);
+  const lines = [
+    ...statusLines.map((line) => line.slice(0, width)),
+    separator.slice(0, width),
+    ...visibleLogs.map((line) => line.slice(0, width)),
+    "",
+    `cc1101> ${inputLine}`.slice(0, width),
+  ];
+
+  return lines.join("\n");
+}
+
+function attachConsole(shell, rl) {
+  const originals = {
+    log: console.log,
+    error: console.error,
+    warn: console.warn,
+  };
+  const logLines = [];
+  let scheduled = false;
+
+  const render = () => {
+    scheduled = false;
+    const dashboard = createDashboard({
+      shell,
+      logLines,
+      inputLine: rl.line ?? "",
+    });
+
+    process.stdout.write(ansiEscapes.eraseScreen);
+    process.stdout.write(ansiEscapes.cursorTo(0, 0));
+    process.stdout.write(dashboard);
+  };
+
+  const scheduleRender = () => {
+    if (scheduled) return;
+    scheduled = true;
+    setImmediate(render);
+  };
+
+  const pushLog = (prefix, args) => {
+    const message = args
+      .map((value) => {
+        if (typeof value === "string") return value;
+        try {
+          return JSON.stringify(value, null, 2);
+        } catch {
+          return String(value);
+        }
+      })
+      .join(" ");
+
+    const rows = `${prefix}${message}`.split("\n");
+    logLines.push(...rows);
+    if (logLines.length > 500) {
+      logLines.splice(0, logLines.length - 500);
+    }
+    scheduleRender();
+  };
+
+  console.log = (...args) => pushLog("", args);
+  console.error = (...args) => pushLog("[error] ", args);
+  console.warn = (...args) => pushLog("[warn] ", args);
+
+  return {
+    render: scheduleRender,
+    restore: () => {
+      console.log = originals.log;
+      console.error = originals.error;
+      console.warn = originals.warn;
+      process.stdout.write(ansiEscapes.eraseScreen);
+      process.stdout.write(ansiEscapes.cursorTo(0, 0));
+    },
+  };
 }
 
 async function main() {
@@ -977,24 +1061,21 @@ async function main() {
     prompt: "cc1101> ",
     historySize: 200,
   });
+  readline.emitKeypressEvents(process.stdin, rl);
 
   let shuttingDown = false;
   let interrupting = false;
-
-  const prompt = () => {
-    if (!shuttingDown) {
-      rl.prompt();
-    }
-  };
-
-  const printStatus = () => {
-    console.log(createStatusText(shell));
-  };
+  const ui = attachConsole(shell, rl);
+  process.stdout.write(ansiEscapes.enterAlternativeScreen);
+  process.stdout.write(ansiEscapes.cursorHide);
 
   const closeShell = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
     await shell.disconnect().catch(() => {});
+    ui.restore();
+    process.stdout.write(ansiEscapes.cursorShow);
+    process.stdout.write(ansiEscapes.leaveAlternativeScreen);
     process.exit(0);
   };
 
@@ -1012,8 +1093,7 @@ async function main() {
       }
     } finally {
       interrupting = false;
-      printStatus();
-      prompt();
+      ui.render();
     }
   };
 
@@ -1032,15 +1112,24 @@ async function main() {
     } catch (error) {
       console.error(error.message);
     } finally {
-      if (line) {
-        printStatus();
-      }
-      prompt();
+      ui.render();
     }
   });
 
   rl.on("SIGINT", () => {
     void handleInterrupt();
+  });
+
+  process.stdin.on("keypress", () => {
+    ui.render();
+  });
+
+  rl.on("history", () => {
+    ui.render();
+  });
+
+  process.stdout.on("resize", () => {
+    ui.render();
   });
 
   rl.on("close", () => {
@@ -1051,13 +1140,12 @@ async function main() {
 
   try {
     await shell.connect();
-    printBanner(shell);
+    console.log("interactive shell ready");
   } catch (error) {
     console.error(`startup failed: ${error.message}`);
-    printBanner(shell);
   }
 
-  prompt();
+  ui.render();
 }
 
 main().catch((error) => {

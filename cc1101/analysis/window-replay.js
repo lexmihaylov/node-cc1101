@@ -22,6 +22,7 @@ const { loadCaptureFile } = require("./capture-file");
  * @property {number=} bus
  * @property {number=} device
  * @property {number=} speedHz
+ * @property {number=} txDataGpio
  * @property {number=} gpio
  * @property {number=} repeats
  * @property {number=} repeatGapUs
@@ -105,7 +106,7 @@ class CC1101WindowReplayer {
       bus: options.bus ?? 0,
       device: options.device ?? 0,
       speedHz: options.speedHz ?? 100000,
-      gpio: options.gpio ?? 24,
+      txDataGpio: options.txDataGpio ?? options.gpio ?? 24,
       repeats: options.repeats ?? 10,
       repeatGapUs: options.repeatGapUs ?? 10000,
       preDelayMs: options.preDelayMs ?? 1000,
@@ -123,7 +124,7 @@ class CC1101WindowReplayer {
       device: this.options.device,
       speedHz: this.options.speedHz,
     });
-    const gdo = new Gpio(this.options.gpio, { mode: Gpio.OUTPUT, alert: false });
+    const txDataPin = new Gpio(this.options.txDataGpio, { mode: Gpio.OUTPUT, alert: false });
 
     try {
       await radio.open();
@@ -131,7 +132,7 @@ class CC1101WindowReplayer {
       await radio.verifyChip();
       await radio.startDirectAsyncTx();
 
-      this.options.onMessage(`gpio:          ${this.options.gpio}`);
+      this.options.onMessage(`txDataGpio:    ${this.options.txDataGpio}`);
       this.options.onMessage(`mode:          ${replay.mode}`);
       this.options.onMessage(`baseUs:        ${replay.baseUs}`);
       this.options.onMessage(`slice:         ${replay.start}..${replay.end}`);
@@ -148,18 +149,18 @@ class CC1101WindowReplayer {
 
       for (let repeat = 0; repeat < this.options.repeats; repeat += 1) {
         for (let i = 0; i < replay.durationsUs.length; i += 1) {
-          gdo.digitalWrite(replay.levels[i] ? 1 : 0);
+          txDataPin.digitalWrite(replay.levels[i] ? 1 : 0);
           sleepUs(replay.durationsUs[i]);
         }
 
-        gdo.digitalWrite(0);
+        txDataPin.digitalWrite(0);
         sleepUs(this.options.repeatGapUs);
       }
 
       this.options.onMessage("TX done");
     } finally {
       try {
-        gdo.digitalWrite(0);
+        txDataPin.digitalWrite(0);
       } catch {}
       try {
         await radio.idle();

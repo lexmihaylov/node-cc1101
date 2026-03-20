@@ -38,6 +38,7 @@ const { buildCaptureFilepath, saveCaptureFile } = require("./capture-file");
  * @property {number=} bus
  * @property {number=} device
  * @property {number=} speedHz
+ * @property {number=} rxDataGpio
  * @property {number=} gdo0
  * @property {number=} threshold
  * @property {number=} baseUs
@@ -111,7 +112,7 @@ class CC1101WindowCapture {
       bus: options.bus ?? 0,
       device: options.device ?? 0,
       speedHz: options.speedHz ?? 100000,
-      gdo0: options.gdo0 ?? 24,
+      rxDataGpio: options.rxDataGpio ?? options.gdo0 ?? 24,
       threshold: options.threshold ?? 100,
       baseUs: options.baseUs ?? 400,
       beforeMs: options.beforeMs ?? 1000,
@@ -135,7 +136,7 @@ class CC1101WindowCapture {
     };
 
     this.radio = null;
-    this.gdo0Pin = null;
+    this.rxDataPin = null;
     this.loopPromise = null;
     this.stopping = false;
     this.lastTick = 0;
@@ -196,7 +197,7 @@ class CC1101WindowCapture {
       device: this.options.device,
       speedHz: this.options.speedHz,
     });
-    this.gdo0Pin = new Gpio(this.options.gdo0, {
+    this.rxDataPin = new Gpio(this.options.rxDataGpio, {
       mode: Gpio.INPUT,
       alert: true,
     });
@@ -219,10 +220,10 @@ class CC1101WindowCapture {
     await sleep(100);
 
     this.options.onMessage(
-      `window capture started gdo0=${this.options.gdo0} threshold=${this.options.threshold} baseUs=${this.options.baseUs} beforeMs=${this.options.beforeMs} afterMs=${this.options.afterMs} outDir=${this.options.outDir}`
+      `window capture started rxDataGpio=${this.options.rxDataGpio} cc1101DataGdo=gdo2 threshold=${this.options.threshold} baseUs=${this.options.baseUs} beforeMs=${this.options.beforeMs} afterMs=${this.options.afterMs} outDir=${this.options.outDir}`
     );
 
-    this.gdo0Pin.on("alert", (level, tick) => this.handleAlert(level, tick));
+    this.rxDataPin.on("alert", (level, tick) => this.handleAlert(level, tick));
     this.loopPromise = this.runLoop().finally(() => {
       this.loopPromise = null;
     });
@@ -293,11 +294,11 @@ class CC1101WindowCapture {
   async stop() {
     this.stopping = true;
 
-    if (this.gdo0Pin) {
+    if (this.rxDataPin) {
       try {
-        this.gdo0Pin.disableAlert();
+        this.rxDataPin.disableAlert();
       } catch {}
-      this.gdo0Pin = null;
+      this.rxDataPin = null;
     }
 
     if (this.loopPromise) {
