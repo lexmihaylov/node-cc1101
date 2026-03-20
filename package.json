@@ -1,0 +1,35 @@
+{
+  "name": "node-cc1101",
+  "version": "0.1.0",
+  "description": "Node.js CC1101 library and Raspberry Pi shell for 433/868/915 MHz RF over SPI and GPIO.",
+  "main": "index.js",
+  "bin": {
+    "cc1101-shell": "./radio-shell.js"
+  },
+  "files": [
+    "index.js",
+    "radio-shell.js",
+    "cc1101"
+  ],
+  "scripts": {
+    "shell": "node radio-shell.js",
+    "check": "node --check index.js && node --check radio-shell.js && find cc1101 -name '*.js' -print0 | xargs -0 -n1 node --check"
+  },
+  "keywords": [
+    "cc1101",
+    "raspberry-pi",
+    "rf",
+    "433mhz",
+    "gpio",
+    "spi"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "pigpio": "^3.3.1",
+    "spi-device": "^3.1.2"
+  }
+}
