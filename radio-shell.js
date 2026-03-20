@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const readline = require("readline");
+const blessed = require("blessed");
 const { CC1101ProtocolDetector } = require("./cc1101/analysis/protocol-detector");
 const { CC1101ProtocolListener } = require("./cc1101/analysis/protocol-listener");
 const { CC1101RawListener } = require("./cc1101/analysis/raw-listener");
@@ -42,6 +42,61 @@ const MARCSTATE_MAP = {
   0x13: "TX",
   0x16: "TX_UNDERFLOW",
 };
+
+const COMMAND_GROUPS = [
+  {
+    label: "Core",
+    commands: ["help", "connect [bus] [device] [speedHz]", "disconnect", "reset", "info", "status"],
+  },
+  {
+    label: "Config",
+    commands: [
+      "config show",
+      "config set <packet|direct_async> [band] [modulation]",
+      "gpio set [gdo0] [gdo2] [gdo1]",
+      "idle",
+    ],
+  },
+  {
+    label: "Packet",
+    commands: ["listen start [pollMs]", "listen stop", "rssi [count] [intervalMs]", "tx <hex-bytes...>"],
+  },
+  {
+    label: "Analysis",
+    commands: [
+      "live view [gdo0] [gdo2] [threshold] [windowMs]",
+      "raw listen [gpio] [threshold] [captureMs]",
+      "signal detect [gdo0] [threshold] [lookbackMs] [settleMs]",
+      "timing fixed [gdo0] [threshold] [baseUs] [lookbackMs]",
+      "segment collect [gdo0] [threshold] [baseUs] [lookbackMs]",
+      "burst match [gpio] [silenceGapUs] [minEdges] [baseUnitUs]",
+      "canonical build [gpio] [silenceGapUs] [minEdges] [baseUnitUs]",
+      "stabilize frame [gdo0] [threshold] [baseUs] [lookbackMs]",
+      "consensus start [gdo0] [threshold] [baseUs] [beforeMs] [afterMs]",
+      "slice inspect [gdo0] [threshold] [baseUs] [beforeMs] [afterMs]",
+      "frame extract [gdo0] [gdo2] [threshold] [silenceGapUs] [minEdges]",
+    ],
+  },
+  {
+    label: "Capture",
+    commands: [
+      "capture save [gdo0] [threshold] [baseUs] [beforeMs] [afterMs] [outDir]",
+      "capture show <file>",
+      "capture replay <file> [gpio] [mode] [repeats] [baseUs]",
+      "window capture [gdo0] [threshold] [baseUs] [beforeMs] [afterMs] [outDir]",
+      "window replay <file> [gpio] [mode] [repeats] [baseUs]",
+    ],
+  },
+  {
+    label: "Protocol",
+    commands: [
+      "protocol detect [gdo0] [threshold] [baseUs]",
+      "protocol listen [name] [gdo0] [threshold] [baseUs] [tolerance]",
+      "protocol stop",
+      "exit",
+    ],
+  },
+];
 
 function createDefaultRadioConfig() {
   return {
@@ -764,217 +819,491 @@ class RadioShell {
   }
 }
 
+async function executeCommand(shell, line, onExit) {
+  const tokens = parseLine(line.trim());
+
+  if (!tokens.length) {
+    return;
+  }
+
+  const [command, subcommand, ...rest] = tokens;
+
+  if (command === "help") {
+    shell.printHelp();
+  } else if (command === "connect") {
+    await shell.connect(subcommand, rest[0], rest[1]);
+  } else if (command === "disconnect") {
+    await shell.disconnect();
+    console.log("disconnected");
+  } else if (command === "reset") {
+    await shell.reset();
+  } else if (command === "info") {
+    await shell.printInfo();
+  } else if (command === "status") {
+    await shell.printStatus();
+  } else if (command === "config" && subcommand === "show") {
+    shell.printConfig();
+  } else if (command === "config" && subcommand === "set") {
+    shell.setConfig(rest[0], rest[1], rest[2]);
+  } else if (command === "gpio" && subcommand === "set") {
+    shell.setGpio(rest[0], rest[1], rest[2]);
+  } else if (command === "listen" && subcommand === "start") {
+    void shell.startListening(Number(rest[0] ?? 20)).catch((error) => {
+      console.error(`listen failed: ${error.message}`);
+    });
+  } else if (command === "listen" && subcommand === "stop") {
+    await shell.stopListening();
+  } else if (command === "live" && subcommand === "view") {
+    await shell.startLiveView(
+      Number(rest[0] ?? 24),
+      Number(rest[1] ?? 25),
+      Number(rest[2] ?? 100),
+      Number(rest[3] ?? 3000)
+    );
+  } else if (command === "raw" && subcommand === "listen") {
+    await shell.startRawListen(
+      Number(rest[0] ?? 24),
+      Number(rest[1] ?? 100),
+      Number(rest[2] ?? 220)
+    );
+  } else if (command === "signal" && subcommand === "detect") {
+    await shell.startSignalDetect(
+      Number(rest[0] ?? 24),
+      Number(rest[1] ?? 100),
+      Number(rest[2] ?? 1000),
+      Number(rest[3] ?? 220)
+    );
+  } else if (command === "timing" && subcommand === "fixed") {
+    await shell.startFixedTiming(
+      Number(rest[0] ?? 24),
+      Number(rest[1] ?? 100),
+      Number(rest[2] ?? 500),
+      Number(rest[3] ?? 1000)
+    );
+  } else if (command === "segment" && subcommand === "collect") {
+    await shell.startSegmentCollect(
+      Number(rest[0] ?? 24),
+      Number(rest[1] ?? 100),
+      Number(rest[2] ?? 400),
+      Number(rest[3] ?? 500)
+    );
+  } else if (command === "burst" && subcommand === "match") {
+    await shell.startBurstMatch(
+      Number(rest[0] ?? 24),
+      Number(rest[1] ?? 10000),
+      Number(rest[2] ?? 16),
+      Number(rest[3] ?? 0)
+    );
+  } else if (command === "canonical" && subcommand === "build") {
+    await shell.startCanonicalBuild(
+      Number(rest[0] ?? 24),
+      Number(rest[1] ?? 10000),
+      Number(rest[2] ?? 16),
+      Number(rest[3] ?? 0)
+    );
+  } else if (command === "stabilize" && subcommand === "frame") {
+    await shell.startFrameStabilize(
+      Number(rest[0] ?? 24),
+      Number(rest[1] ?? 100),
+      Number(rest[2] ?? 500),
+      Number(rest[3] ?? 1000)
+    );
+  } else if (command === "consensus" && subcommand === "start") {
+    await shell.startConsensus(
+      Number(rest[0] ?? 24),
+      Number(rest[1] ?? 100),
+      Number(rest[2] ?? 400),
+      Number(rest[3] ?? 1000),
+      Number(rest[4] ?? 1000)
+    );
+  } else if (command === "slice" && subcommand === "inspect") {
+    await shell.startSliceInspect(
+      Number(rest[0] ?? 24),
+      Number(rest[1] ?? 100),
+      Number(rest[2] ?? 400),
+      Number(rest[3] ?? 1000),
+      Number(rest[4] ?? 1000)
+    );
+  } else if (command === "frame" && subcommand === "extract") {
+    await shell.startFrameExtract(
+      Number(rest[0] ?? 24),
+      Number(rest[1] ?? 25),
+      Number(rest[2] ?? 100),
+      Number(rest[3] ?? 8000),
+      Number(rest[4] ?? 12)
+    );
+  } else if (command === "capture" && subcommand === "save") {
+    await shell.saveCapture(
+      Number(rest[0] ?? 24),
+      Number(rest[1] ?? 100),
+      Number(rest[2] ?? 400),
+      Number(rest[3] ?? 1000),
+      Number(rest[4] ?? 1000),
+      rest[5] ?? "/tmp/rf-captures"
+    );
+  } else if (command === "capture" && subcommand === "show") {
+    shell.showCapture(rest[0]);
+  } else if (command === "capture" && subcommand === "replay") {
+    await shell.replayWindow(
+      rest[0],
+      Number(rest[1] ?? 24),
+      rest[2] ?? "normalized",
+      Number(rest[3] ?? 10),
+      rest[4] !== undefined ? Number(rest[4]) : undefined
+    );
+  } else if (command === "window" && subcommand === "capture") {
+    await shell.startWindowCapture(
+      Number(rest[0] ?? 24),
+      Number(rest[1] ?? 100),
+      Number(rest[2] ?? 400),
+      Number(rest[3] ?? 1000),
+      Number(rest[4] ?? 1000),
+      rest[5] ?? "/tmp/rf-captures"
+    );
+  } else if (command === "window" && subcommand === "replay") {
+    await shell.replayWindow(
+      rest[0],
+      Number(rest[1] ?? 24),
+      rest[2] ?? "normalized",
+      Number(rest[3] ?? 10),
+      rest[4] !== undefined ? Number(rest[4]) : undefined
+    );
+  } else if (command === "protocol" && subcommand === "detect") {
+    await shell.startProtocolDetection(
+      Number(rest[0] ?? 24),
+      Number(rest[1] ?? 100),
+      Number(rest[2] ?? 375)
+    );
+  } else if (command === "protocol" && subcommand === "listen") {
+    await shell.startProtocolListen(
+      rest[0] ?? "ev1527_like",
+      Number(rest[1] ?? 24),
+      Number(rest[2] ?? 100),
+      Number(rest[3] ?? 375),
+      Number(rest[4] ?? 1)
+    );
+  } else if (command === "protocol" && subcommand === "stop") {
+    await shell.stopProtocolRuntime();
+  } else if (command === "rssi") {
+    await shell.sampleRssi(Number(subcommand ?? 10), Number(rest[0] ?? 100));
+  } else if (command === "tx") {
+    await shell.transmit([subcommand, ...rest].filter(Boolean));
+  } else if (command === "idle") {
+    await shell.idle();
+  } else if (command === "quit" || command === "exit") {
+    onExit();
+  } else {
+    console.log("unknown command; type `help`");
+  }
+}
+
+function createCommandReference() {
+  return COMMAND_GROUPS.map((group) => {
+    const body = group.commands.map((command) => ` {gray-fg}•{/gray-fg} ${command}`).join("\n");
+    return `{bold}${group.label}{/bold}\n${body}`;
+  }).join("\n\n");
+}
+
+function createStatusText(shell) {
+  const config = shell.radioConfig;
+  const runtime = shell.listening ? "packet listen" : shell.protocolRuntime ? "analysis runtime" : "idle";
+  const transport = shell.radio ? "connected" : "disconnected";
+
+  return [
+    `{bold}${transport}{/bold}`,
+    `bus     ${shell.bus}`,
+    `device  ${shell.device}`,
+    `speed   ${shell.speedHz}`,
+    "",
+    `{bold}mode{/bold}`,
+    `radio   ${config.mode}`,
+    `band    ${config.band}`,
+    `mod     ${config.modulation}`,
+    `state   ${runtime}`,
+  ].join("\n");
+}
+
+function attachConsole(screen, logBox) {
+  const originals = {
+    log: console.log,
+    error: console.error,
+    warn: console.warn,
+  };
+
+  const renderLine = (level, args) => {
+    const message = args
+      .map((value) => {
+        if (typeof value === "string") return value;
+        try {
+          return JSON.stringify(value, null, 2);
+        } catch {
+          return String(value);
+        }
+      })
+      .join(" ");
+
+    if (!message) return;
+
+    const style =
+      level === "error" ? "{red-fg}" :
+      level === "warn" ? "{yellow-fg}" :
+      "{white-fg}";
+
+    logBox.pushLine(`${style}${message}{/${style.slice(1)}`);
+    logBox.setScrollPerc(100);
+    screen.render();
+  };
+
+  console.log = (...args) => renderLine("log", args);
+  console.error = (...args) => renderLine("error", args);
+  console.warn = (...args) => renderLine("warn", args);
+
+  return () => {
+    console.log = originals.log;
+    console.error = originals.error;
+    console.warn = originals.warn;
+  };
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   const bus = Number(args.bus ?? 0);
   const device = Number(args.device ?? 0);
   const speedHz = Number(args.speed ?? 100000);
-
   const shell = new RadioShell({ bus, device, speedHz });
-  await shell.connect();
 
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    prompt: "cc1101> ",
+  const screen = blessed.screen({
+    smartCSR: true,
+    fullUnicode: true,
+    title: "CC1101 Control Surface",
   });
 
-  console.log("interactive shell ready; type `help`");
-  rl.prompt();
+  const header = blessed.box({
+    parent: screen,
+    top: 0,
+    left: 0,
+    width: "100%",
+    height: 3,
+    tags: true,
+    padding: { left: 1, right: 1 },
+    style: {
+      fg: "white",
+      bg: "#12343b",
+    },
+    content: "{bold}CC1101 Control Surface{/bold}  {gray-fg}Enter runs command, Ctrl+C interrupts active listen/runtime, exit closes shell{/gray-fg}",
+  });
 
-  rl.on("line", async (line) => {
-    const tokens = parseLine(line.trim());
+  const statusBox = blessed.box({
+    parent: screen,
+    top: 3,
+    left: 0,
+    width: "28%",
+    height: "70%",
+    label: " Status ",
+    tags: true,
+    border: "line",
+    padding: { left: 1, right: 1 },
+    style: {
+      fg: "white",
+      border: { fg: "#3fa7d6" },
+      label: { fg: "#9bd1e5" },
+    },
+  });
 
-    if (!tokens.length) {
-      rl.prompt();
+  const commandBox = blessed.box({
+    parent: screen,
+    top: 3,
+    left: "28%",
+    width: "72%",
+    height: "28%",
+    label: " Command Map ",
+    tags: true,
+    border: "line",
+    scrollable: true,
+    alwaysScroll: true,
+    keys: true,
+    vi: true,
+    padding: { left: 1, right: 1 },
+    style: {
+      fg: "white",
+      border: { fg: "#7d5ba6" },
+      label: { fg: "#c6b5e9" },
+    },
+    content: createCommandReference(),
+  });
+
+  const logBox = blessed.log({
+    parent: screen,
+    top: "31%",
+    left: "28%",
+    width: "72%",
+    height: "52%",
+    label: " Radio Log ",
+    tags: true,
+    border: "line",
+    scrollable: true,
+    alwaysScroll: true,
+    keys: true,
+    mouse: true,
+    vi: true,
+    padding: { left: 1, right: 1 },
+    scrollbar: {
+      ch: " ",
+      track: { bg: "#1f2d3d" },
+      style: { inverse: true },
+    },
+    style: {
+      fg: "white",
+      border: { fg: "#f2a65a" },
+      label: { fg: "#ffd6a5" },
+    },
+  });
+
+  const inputLabel = blessed.box({
+    parent: screen,
+    bottom: 3,
+    left: 0,
+    width: "100%",
+    height: 3,
+    tags: true,
+    style: {
+      fg: "white",
+      bg: "#162129",
+    },
+    padding: { left: 1, right: 1 },
+    content: "{bold}Command{/bold}  {gray-fg}Examples: listen start 20 | tx aa 55 01 | protocol listen ev1527_like{/gray-fg}",
+  });
+
+  const input = blessed.textbox({
+    parent: screen,
+    bottom: 0,
+    left: 0,
+    width: "100%",
+    height: 3,
+    inputOnFocus: true,
+    border: "line",
+    padding: { left: 1, right: 1 },
+    style: {
+      fg: "white",
+      bg: "#0f1a20",
+      border: { fg: "#3fa7d6" },
+      focus: {
+        border: { fg: "#f2a65a" },
+      },
+    },
+  });
+
+  let shuttingDown = false;
+  let interrupting = false;
+  const restoreConsole = attachConsole(screen, logBox);
+  const commandHistory = [];
+  let historyIndex = 0;
+
+  const refresh = () => {
+    statusBox.setContent(createStatusText(shell));
+    screen.render();
+  };
+
+  const closeShell = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    restoreConsole();
+    await shell.disconnect().catch(() => {});
+    screen.destroy();
+    process.exit(0);
+  };
+
+  const handleInterrupt = async () => {
+    if (interrupting || shuttingDown) return;
+    interrupting = true;
+
+    try {
+      const hadActiveRuntime = shell.listening || Boolean(shell.protocolRuntime);
+      await shell.stopListening();
+      await shell.stopProtocolRuntime();
+
+      if (!hadActiveRuntime) {
+        console.log("interrupt ignored; no active runtime");
+      }
+    } finally {
+      interrupting = false;
+      refresh();
+      input.focus();
+      screen.render();
+    }
+  };
+
+  input.key("up", () => {
+    if (!commandHistory.length) return;
+    historyIndex = Math.max(0, historyIndex - 1);
+    input.setValue(commandHistory[historyIndex] ?? "");
+    screen.render();
+  });
+
+  input.key("down", () => {
+    if (!commandHistory.length) return;
+    historyIndex = Math.min(commandHistory.length, historyIndex + 1);
+    input.setValue(commandHistory[historyIndex] ?? "");
+    screen.render();
+  });
+
+  input.key("C-c", () => {
+    void handleInterrupt();
+  });
+
+  screen.key(["C-c"], () => {
+    void handleInterrupt();
+  });
+
+  process.on("SIGINT", () => {
+    void handleInterrupt();
+  });
+
+  process.on("SIGTERM", () => {
+    void closeShell();
+  });
+
+  input.on("submit", async (value) => {
+    const line = value.trim();
+    input.clearValue();
+
+    if (!line) {
+      screen.render();
       return;
     }
 
-    try {
-      const [command, subcommand, ...rest] = tokens;
+    commandHistory.push(line);
+    historyIndex = commandHistory.length;
+    console.log(`> ${line}`);
 
-      if (command === "help") {
-        shell.printHelp();
-      } else if (command === "connect") {
-        await shell.connect(subcommand, rest[0], rest[1]);
-      } else if (command === "disconnect") {
-        await shell.disconnect();
-        console.log("disconnected");
-      } else if (command === "reset") {
-        await shell.reset();
-      } else if (command === "info") {
-        await shell.printInfo();
-      } else if (command === "status") {
-        await shell.printStatus();
-      } else if (command === "config" && subcommand === "show") {
-        shell.printConfig();
-      } else if (command === "config" && subcommand === "set") {
-        shell.setConfig(rest[0], rest[1], rest[2]);
-      } else if (command === "gpio" && subcommand === "set") {
-        shell.setGpio(rest[0], rest[1], rest[2]);
-      } else if (command === "listen" && subcommand === "start") {
-        void shell.startListening(Number(rest[0] ?? 20)).catch((error) => {
-          console.error(`listen failed: ${error.message}`);
-        });
-      } else if (command === "listen" && subcommand === "stop") {
-        await shell.stopListening();
-      } else if (command === "live" && subcommand === "view") {
-        await shell.startLiveView(
-          Number(rest[0] ?? 24),
-          Number(rest[1] ?? 25),
-          Number(rest[2] ?? 100),
-          Number(rest[3] ?? 3000)
-        );
-      } else if (command === "raw" && subcommand === "listen") {
-        await shell.startRawListen(
-          Number(rest[0] ?? 24),
-          Number(rest[1] ?? 100),
-          Number(rest[2] ?? 220)
-        );
-      } else if (command === "signal" && subcommand === "detect") {
-        await shell.startSignalDetect(
-          Number(rest[0] ?? 24),
-          Number(rest[1] ?? 100),
-          Number(rest[2] ?? 1000),
-          Number(rest[3] ?? 220)
-        );
-      } else if (command === "timing" && subcommand === "fixed") {
-        await shell.startFixedTiming(
-          Number(rest[0] ?? 24),
-          Number(rest[1] ?? 100),
-          Number(rest[2] ?? 500),
-          Number(rest[3] ?? 1000)
-        );
-      } else if (command === "segment" && subcommand === "collect") {
-        await shell.startSegmentCollect(
-          Number(rest[0] ?? 24),
-          Number(rest[1] ?? 100),
-          Number(rest[2] ?? 400),
-          Number(rest[3] ?? 500)
-        );
-      } else if (command === "burst" && subcommand === "match") {
-        await shell.startBurstMatch(
-          Number(rest[0] ?? 24),
-          Number(rest[1] ?? 10000),
-          Number(rest[2] ?? 16),
-          Number(rest[3] ?? 0)
-        );
-      } else if (command === "canonical" && subcommand === "build") {
-        await shell.startCanonicalBuild(
-          Number(rest[0] ?? 24),
-          Number(rest[1] ?? 10000),
-          Number(rest[2] ?? 16),
-          Number(rest[3] ?? 0)
-        );
-      } else if (command === "stabilize" && subcommand === "frame") {
-        await shell.startFrameStabilize(
-          Number(rest[0] ?? 24),
-          Number(rest[1] ?? 100),
-          Number(rest[2] ?? 500),
-          Number(rest[3] ?? 1000)
-        );
-      } else if (command === "consensus" && subcommand === "start") {
-        await shell.startConsensus(
-          Number(rest[0] ?? 24),
-          Number(rest[1] ?? 100),
-          Number(rest[2] ?? 400),
-          Number(rest[3] ?? 1000),
-          Number(rest[4] ?? 1000)
-        );
-      } else if (command === "slice" && subcommand === "inspect") {
-        await shell.startSliceInspect(
-          Number(rest[0] ?? 24),
-          Number(rest[1] ?? 100),
-          Number(rest[2] ?? 400),
-          Number(rest[3] ?? 1000),
-          Number(rest[4] ?? 1000)
-        );
-      } else if (command === "frame" && subcommand === "extract") {
-        await shell.startFrameExtract(
-          Number(rest[0] ?? 24),
-          Number(rest[1] ?? 25),
-          Number(rest[2] ?? 100),
-          Number(rest[3] ?? 8000),
-          Number(rest[4] ?? 12)
-        );
-      } else if (command === "capture" && subcommand === "save") {
-        await shell.saveCapture(
-          Number(rest[0] ?? 24),
-          Number(rest[1] ?? 100),
-          Number(rest[2] ?? 400),
-          Number(rest[3] ?? 1000),
-          Number(rest[4] ?? 1000),
-          rest[5] ?? "/tmp/rf-captures"
-        );
-      } else if (command === "capture" && subcommand === "show") {
-        shell.showCapture(rest[0]);
-      } else if (command === "capture" && subcommand === "replay") {
-        await shell.replayWindow(
-          rest[0],
-          Number(rest[1] ?? 24),
-          rest[2] ?? "normalized",
-          Number(rest[3] ?? 10),
-          rest[4] !== undefined ? Number(rest[4]) : undefined
-        );
-      } else if (command === "window" && subcommand === "capture") {
-        await shell.startWindowCapture(
-          Number(rest[0] ?? 24),
-          Number(rest[1] ?? 100),
-          Number(rest[2] ?? 400),
-          Number(rest[3] ?? 1000),
-          Number(rest[4] ?? 1000),
-          rest[5] ?? "/tmp/rf-captures"
-        );
-      } else if (command === "window" && subcommand === "replay") {
-        await shell.replayWindow(
-          rest[0],
-          Number(rest[1] ?? 24),
-          rest[2] ?? "normalized",
-          Number(rest[3] ?? 10),
-          rest[4] !== undefined ? Number(rest[4]) : undefined
-        );
-      } else if (command === "protocol" && subcommand === "detect") {
-        await shell.startProtocolDetection(
-          Number(rest[0] ?? 24),
-          Number(rest[1] ?? 100),
-          Number(rest[2] ?? 375)
-        );
-      } else if (command === "protocol" && subcommand === "listen") {
-        await shell.startProtocolListen(
-          rest[0] ?? "ev1527_like",
-          Number(rest[1] ?? 24),
-          Number(rest[2] ?? 100),
-          Number(rest[3] ?? 375),
-          Number(rest[4] ?? 1)
-        );
-      } else if (command === "protocol" && subcommand === "stop") {
-        await shell.stopProtocolRuntime();
-      } else if (command === "rssi") {
-        await shell.sampleRssi(Number(subcommand ?? 10), Number(rest[0] ?? 100));
-      } else if (command === "tx") {
-        await shell.transmit([subcommand, ...rest].filter(Boolean));
-      } else if (command === "idle") {
-        await shell.idle();
-      } else if (command === "quit" || command === "exit") {
-        rl.close();
-        return;
-      } else {
-        console.log("unknown command; type `help`");
-      }
+    try {
+      await executeCommand(shell, line, () => {
+        void closeShell();
+      });
     } catch (error) {
       console.error(error.message);
+    } finally {
+      refresh();
+      input.focus();
+      screen.render();
+      input.readInput();
     }
-
-    rl.prompt();
   });
 
-  rl.on("close", async () => {
-    await shell.disconnect().catch(() => {});
-    process.exit(0);
-  });
+  screen.on("resize", refresh);
 
-  process.on("SIGINT", () => rl.close());
-  process.on("SIGTERM", () => rl.close());
+  try {
+    await shell.connect();
+    console.log("interactive shell ready");
+    console.log("use the command map on the right; only `exit` or `quit` closes the shell");
+  } catch (error) {
+    console.error(`startup failed: ${error.message}`);
+  }
+
+  refresh();
+  input.focus();
+  screen.render();
+  input.readInput();
 }
 
 main().catch((error) => {
