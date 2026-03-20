@@ -5,10 +5,10 @@ const { CC1101Driver } = require("../driver");
 const { STATUS } = require("../constants");
 const { BAND, MODULATION, RADIO_MODE } = require("../profiles");
 const { sleep } = require("../utils");
+const { renderSignalSummary } = require("./signal-renderer");
 const {
   compactTokens,
   quantizeEdges,
-  renderBars,
   smoothQuantizedEdges,
   trimHistory,
 } = require("./signal-analysis");
@@ -101,8 +101,25 @@ class CC1101ManualSlicer {
         this.options.onMessage(`relTimeSec:   ${relMs.join(",")}`);
         this.options.onMessage(`compact:      ${compactSignal(result.quantized, false)}`);
         if (result.smoothUnits) this.options.onMessage(`smoothCmpct:  ${compactSignal(result.quantized, true)}`);
-        this.options.onMessage(`bars:         ${renderBars(units, 160)}`);
-        if (result.smoothUnits) this.options.onMessage(`smoothBars:   ${renderBars(smoothUnits, 160)}`);
+        for (const line of renderSignalSummary({
+          label: "window",
+          units,
+          levels: result.quantized.map((edge) => edge.level),
+          durationsUs: result.quantized.map((edge) => edge.dtUs),
+          snappedUs: result.quantized.map((edge) => edge.snappedUs),
+        })) {
+          this.options.onMessage(line);
+        }
+        if (result.smoothUnits) {
+          for (const line of renderSignalSummary({
+            label: "smooth",
+            units: smoothUnits,
+            levels: result.quantized.map((edge) => edge.level),
+            durationsUs: result.quantized.map((edge) => edge.dtUs),
+          })) {
+            this.options.onMessage(line);
+          }
+        }
         this.options.onMessage("");
 
         this.options.onMessage("---- indexed rows ----");
@@ -146,8 +163,25 @@ class CC1101ManualSlicer {
         if (result.smoothUnits) this.options.onMessage(`smoothUnits:  ${sliceSmoothUnits.join(",")}`);
         this.options.onMessage(`compact:      ${compactSignal(slice, false)}`);
         if (result.smoothUnits) this.options.onMessage(`smoothCmpct:  ${compactSignal(slice, true)}`);
-        this.options.onMessage(`bars:         ${renderBars(sliceUnits)}`);
-        if (result.smoothUnits) this.options.onMessage(`smoothBars:   ${renderBars(sliceSmoothUnits)}`);
+        for (const line of renderSignalSummary({
+          label: "slice",
+          units: sliceUnits,
+          levels: slice.map((edge) => edge.level),
+          durationsUs: slice.map((edge) => edge.dtUs),
+          snappedUs: slice.map((edge) => edge.snappedUs),
+        })) {
+          this.options.onMessage(line);
+        }
+        if (result.smoothUnits) {
+          for (const line of renderSignalSummary({
+            label: "slice-smooth",
+            units: sliceSmoothUnits,
+            levels: slice.map((edge) => edge.level),
+            durationsUs: slice.map((edge) => edge.dtUs),
+          })) {
+            this.options.onMessage(line);
+          }
+        }
         this.options.onMessage("");
       }),
     };

@@ -214,6 +214,7 @@ class RadioShell {
     console.log("  rssi [count] [intervalMs]");
     console.log("  tx <hex-bytes...>");
     console.log("  idle");
+    console.log("  clear");
     console.log("  quit");
     console.log("");
     console.log("example:");
@@ -945,6 +946,8 @@ async function executeCommand(shell, line, onExit) {
     await shell.transmit([subcommand, ...rest].filter(Boolean));
   } else if (command === "idle") {
     await shell.idle();
+  } else if (command === "clear") {
+    clearTerminal();
   } else if (command === "quit" || command === "exit") {
     onExit();
   } else {
@@ -993,6 +996,10 @@ function colorizeStatus(shell) {
 
 function buildPrompt(shell) {
   return `${colorizeStatus(shell)}\n${COLOR.cyan}cc1101>${COLOR.reset} `;
+}
+
+function clearTerminal() {
+  process.stdout.write("\u001bc");
 }
 
 async function main() {

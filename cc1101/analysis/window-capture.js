@@ -6,8 +6,8 @@ const { CC1101Driver } = require("../driver");
 const { STATUS, VALUE } = require("../constants");
 const { BAND, MODULATION, RADIO_MODE } = require("../profiles");
 const { sleep } = require("../utils");
-const { renderBars } = require("./raw-analysis");
 const { buildCaptureFilepath, saveCaptureFile } = require("./capture-file");
+const { renderSignalSummary } = require("./signal-renderer");
 
 /**
  * @typedef {object} QuantizedCaptureEdge
@@ -130,7 +130,15 @@ class CC1101WindowCapture {
         this.options.onMessage(`PRESS ${capture.id}   ts=${capture.ts}   triggerRSSI=${capture.triggerRssi}`);
         this.options.onMessage(`saved:        ${filepath}`);
         this.options.onMessage(`edges:        ${capture.edgeCount}`);
-        this.options.onMessage(`bars:         ${renderBars(capture.units, 160)}`);
+        for (const line of renderSignalSummary({
+          label: "capture",
+          units: capture.units,
+          levels: capture.levels,
+          durationsUs: capture.durationsUs,
+          snappedUs: capture.snappedUs,
+        })) {
+          this.options.onMessage(line);
+        }
         this.options.onMessage("");
       }),
     };

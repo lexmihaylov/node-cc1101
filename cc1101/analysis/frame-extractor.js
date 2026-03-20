@@ -5,11 +5,10 @@ const { CC1101Driver } = require("../driver");
 const { STATUS } = require("../constants");
 const { BAND, GDO_SIGNAL, MODULATION, RADIO_MODE } = require("../profiles");
 const { sleep } = require("../utils");
+const { renderSignalSummary } = require("./signal-renderer");
 const {
   estimateBaseUnit,
   normalizeToUnits,
-  renderBars,
-  renderWaveform,
   classifyUnit,
 } = require("./raw-analysis");
 
@@ -136,8 +135,14 @@ class CC1101FrameExtractor {
         this.options.onMessage(`durations:    ${frame.durationsUs.join(",")}`);
         this.options.onMessage(`units:        ${units.join(",")}`);
         this.options.onMessage(`compact:      ${compact}`);
-        this.options.onMessage(`bars:         ${renderBars(units, 100)}`);
-        this.options.onMessage(`wave:         ${renderWaveform(frame.durationsUs, 120, frame.levels[0] ?? 1)}`);
+        for (const line of renderSignalSummary({
+          label: "frame",
+          units,
+          levels: frame.levels,
+          durationsUs: frame.durationsUs,
+        })) {
+          this.options.onMessage(`${line}`);
+        }
         this.options.onMessage("");
 
         segments.forEach((segment, idx) => {
@@ -146,8 +151,14 @@ class CC1101FrameExtractor {
           this.options.onMessage(`    durations: ${segment.durationsUs.join(",")}`);
           this.options.onMessage(`    units:     ${segment.units.join(",")}`);
           this.options.onMessage(`    compact:   ${compactUnits(segment.units)}`);
-          this.options.onMessage(`    bars:      ${renderBars(segment.units, 100)}`);
-          this.options.onMessage(`    wave:      ${renderWaveform(segment.durationsUs, 100, segment.levels[0] ?? 1)}`);
+          for (const line of renderSignalSummary({
+            label: `segment ${idx + 1}`,
+            units: segment.units,
+            levels: segment.levels,
+            durationsUs: segment.durationsUs,
+          })) {
+            this.options.onMessage(`    ${line}`);
+          }
         });
 
         if (segments.length) this.options.onMessage("");

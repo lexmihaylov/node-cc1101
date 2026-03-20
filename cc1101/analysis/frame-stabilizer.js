@@ -5,12 +5,12 @@ const { CC1101Driver } = require("../driver");
 const { STATUS } = require("../constants");
 const { BAND, MODULATION, RADIO_MODE } = require("../profiles");
 const { sleep } = require("../utils");
+const { renderSignalSummary } = require("./signal-renderer");
 const {
   bestAlignment,
   buildConsensus,
   compactFrame,
   quantizeEdges,
-  renderBars,
   scoreFrame,
   splitBySilence,
   trimHistory,
@@ -89,7 +89,15 @@ class CC1101FrameStabilizer {
         this.options.onMessage(`edges:        ${result.bestFrame.length}`);
         this.options.onMessage(`units:        ${units.join(",")}`);
         this.options.onMessage(`compact:      ${compactFrame(result.bestFrame)}`);
-        this.options.onMessage(`bars:         ${renderBars(units)}`);
+        for (const line of renderSignalSummary({
+          label: "best",
+          units,
+          levels: result.bestFrame.map((edge) => edge.level),
+          durationsUs: result.bestFrame.map((edge) => edge.dtUs),
+          snappedUs: result.bestFrame.map((edge) => edge.snappedUs),
+        })) {
+          this.options.onMessage(line);
+        }
         this.options.onMessage("");
 
         if (result.bestMatch) {
@@ -98,7 +106,13 @@ class CC1101FrameStabilizer {
           this.options.onMessage(`shift:        ${result.bestMatch.shift}`);
           this.options.onMessage(`score:        ${result.bestMatch.score}/${result.bestMatch.overlap} (${(result.bestMatch.ratio * 100).toFixed(1)}%)`);
           this.options.onMessage(`matchedUnits: ${result.bestMatch.matched.map((token) => token.units).join(",")}`);
-          this.options.onMessage(`matchedBars:  ${renderBars(result.bestMatch.matched.map((token) => token.units))}`);
+          for (const line of renderSignalSummary({
+            label: "match",
+            units: result.bestMatch.matched.map((token) => token.units),
+            levels: result.bestMatch.matched.map((token) => token.level),
+          })) {
+            this.options.onMessage(line);
+          }
           this.options.onMessage("");
         }
 
@@ -107,7 +121,13 @@ class CC1101FrameStabilizer {
           this.options.onMessage(`sources:      ${result.sourceCount}`);
           this.options.onMessage(`units:        ${result.consensus.map((token) => token.units).join(",")}`);
           this.options.onMessage(`compact:      ${compactFrame(result.consensus)}`);
-          this.options.onMessage(`bars:         ${renderBars(result.consensus.map((token) => token.units))}`);
+          for (const line of renderSignalSummary({
+            label: "consensus",
+            units: result.consensus.map((token) => token.units),
+            levels: result.consensus.map((token) => token.level),
+          })) {
+            this.options.onMessage(line);
+          }
           this.options.onMessage("");
         }
       }),

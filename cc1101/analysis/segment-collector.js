@@ -5,10 +5,10 @@ const { CC1101Driver } = require("../driver");
 const { STATUS } = require("../constants");
 const { BAND, MODULATION, RADIO_MODE } = require("../profiles");
 const { sleep } = require("../utils");
+const { renderSignalSummary } = require("./signal-renderer");
 const {
   compactFrame,
   quantizeEdges,
-  renderBars,
   scoreSegment,
   splitBySilence,
   trimHistory,
@@ -84,7 +84,15 @@ class CC1101SegmentCollector {
           this.options.onMessage(`  durations: ${durations.join(",")}`);
           this.options.onMessage(`  units:     ${units.join(",")}`);
           this.options.onMessage(`  compact:   ${compactFrame(segment)}`);
-          this.options.onMessage(`  bars:      ${renderBars(units)}`);
+          for (const line of renderSignalSummary({
+            label: `segment ${idx + 1}`,
+            units,
+            levels,
+            durationsUs: durations,
+            snappedUs: segment.map((edge) => edge.snappedUs),
+          })) {
+            this.options.onMessage(`  ${line}`);
+          }
           this.options.onMessage("");
         });
 
@@ -93,8 +101,16 @@ class CC1101SegmentCollector {
           this.options.onMessage(`press ${recent.id}  RSSI=${recent.triggerRssi}  segs=${recent.segments.length}`);
           recent.segments.forEach((segment, idx) => {
             this.options.onMessage(
-              `  s${idx + 1}  score=${String(scoreSegment(segment)).padStart(2, " ")}  edges=${String(segment.length).padStart(2, " ")}  compact=${compactFrame(segment)}  bars=${renderBars(segment.map((edge) => edge.units), 42)}`
+              `  s${idx + 1}  score=${String(scoreSegment(segment)).padStart(2, " ")}  edges=${String(segment.length).padStart(2, " ")}  compact=${compactFrame(segment)}`
             );
+            for (const line of renderSignalSummary({
+              label: `s${idx + 1}`,
+              units: segment.map((edge) => edge.units),
+              levels: segment.map((edge) => edge.level),
+              maxSteps: 24,
+            })) {
+              this.options.onMessage(`    ${line}`);
+            }
           });
           this.options.onMessage("");
         });

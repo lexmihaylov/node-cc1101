@@ -5,13 +5,13 @@ const { CC1101Driver } = require("../driver");
 const { STATUS } = require("../constants");
 const { BAND, MODULATION, RADIO_MODE } = require("../profiles");
 const { sleep } = require("../utils");
+const { renderSignalSummary } = require("./signal-renderer");
 const {
   buildConsensus,
   buildSlice,
   compactTokens,
   matchMask,
   quantizeEdges,
-  renderBars,
   smoothQuantizedEdges,
   trimHistory,
 } = require("./signal-analysis");
@@ -95,13 +95,25 @@ class CC1101WindowConsensus {
         this.options.onMessage(`levels:       ${result.press.slice.map((edge) => edge.level).join(",")}`);
         this.options.onMessage(`units:        ${result.press.slice.map((edge) => edge.units).join(",")}`);
         this.options.onMessage(`compact:      ${compactTokens(result.press.slice)}`);
-        this.options.onMessage(`bars:         ${renderBars(result.press.slice.map((edge) => edge.units))}`);
+        for (const line of renderSignalSummary({
+          label: "slice",
+          units: result.press.slice.map((edge) => edge.units),
+          levels: result.press.slice.map((edge) => edge.level),
+        })) {
+          this.options.onMessage(line);
+        }
         this.options.onMessage("");
         this.options.onMessage("---- running consensus ----");
         this.options.onMessage(`sources:      ${result.recentSlices.length}`);
         this.options.onMessage(`units:        ${result.consensus.map((edge) => (edge.units === null ? "?" : edge.units)).join(",")}`);
         this.options.onMessage(`compact:      ${compactTokens(result.consensus)}`);
-        this.options.onMessage(`bars:         ${renderBars(result.consensus.map((edge) => edge.units ?? null))}`);
+        for (const line of renderSignalSummary({
+          label: "consensus",
+          units: result.consensus.map((edge) => edge.units),
+          levels: result.consensus.map((edge) => edge.level),
+        })) {
+          this.options.onMessage(line);
+        }
         this.options.onMessage(`matchMask:    ${matchMask(result.consensus)}`);
         this.options.onMessage("");
       }),

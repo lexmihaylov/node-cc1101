@@ -5,10 +5,10 @@ const { CC1101Driver } = require("../driver");
 const { STATUS } = require("../constants");
 const { BAND, MODULATION, RADIO_MODE } = require("../profiles");
 const { sleep } = require("../utils");
+const { renderSignalSummary } = require("./signal-renderer");
 const {
   compactFrame,
   detectProtocolCandidates,
-  renderBars,
 } = require("./protocol-analysis");
 
 /**
@@ -92,7 +92,15 @@ class CC1101ProtocolDetector {
         this.options.onMessage(`edges:        ${candidate.frame.length}`);
         this.options.onMessage(`units:        ${units.join(",")}`);
         this.options.onMessage(`compact:      ${compactFrame(candidate.frame)}`);
-        this.options.onMessage(`bars:         ${renderBars(units)}`);
+        for (const line of renderSignalSummary({
+          label: "candidate",
+          units,
+          levels: candidate.frame.map((edge) => edge.level),
+          durationsUs: candidate.frame.map((edge) => edge.dtUs),
+          snappedUs: candidate.frame.map((edge) => edge.snappedUs),
+        })) {
+          this.options.onMessage(line);
+        }
         this.options.onMessage("");
         this.options.onMessage(`bestMatch:    ${best.name} (${best.score.toFixed(1)})`);
         this.options.onMessage(`details:      ${best.details}`);

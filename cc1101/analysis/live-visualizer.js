@@ -7,6 +7,13 @@ const { BAND, MODULATION, RADIO_MODE } = require("../profiles");
 const { sleep } = require("../utils");
 const { clamp, trimHistory } = require("./signal-analysis");
 
+const ALT_SCREEN_ON = "\x1b[?1049h";
+const ALT_SCREEN_OFF = "\x1b[?1049l";
+const CURSOR_HIDE = "\x1b[?25l";
+const CURSOR_SHOW = "\x1b[?25h";
+const CURSOR_HOME = "\x1b[H";
+const CLEAR_LINE = "\x1b[2K";
+
 /**
  * @typedef {{ t: number, v: number }} TimedSample
  * @typedef {{ start: number, end: number }} TriggerWindow
@@ -173,8 +180,7 @@ class CC1101LiveVisualizer {
       maxRssi: options.maxRssi ?? 255,
       onMessage: options.onMessage ?? ((message) => console.log(message)),
       onRender: options.onRender ?? ((screen) => {
-        process.stdout.write("\x1b[2J\x1b[H");
-        process.stdout.write(`${screen}\n`);
+        process.stdout.write(screen);
       }),
     };
 
@@ -195,6 +201,10 @@ class CC1101LiveVisualizer {
     this.rssiHistory = [];
     /** @type {TriggerWindow[]} */
     this.triggerWindows = [];
+    this.lastScreen = "";
+    this.screenLineCount = 0;
+    this.dirty = true;
+    this.ownsScreen = false;
   }
 
   async getRssiRaw() {
@@ -204,6 +214,7 @@ class CC1101LiveVisualizer {
 
   addTrigger(now) {
     this.triggerWindows.push({ start: now, end: now + this.options.triggerHoldMs });
+    this.dirty = true;
   }
 
   cleanupOld(now) {
@@ -274,7 +285,7 @@ class CC1101LiveVisualizer {
     lines.push(`Current RSSI: ${lastRssi}   GDO0: ${this.gdo0State}   GDO2: ${this.gdo2State}   Active trigger windows: ${activeTriggers}`);
     lines.push("Use this to visually inspect where the waveform becomes structured around red trigger regions.");
 
-    return lines.join("\n");
+    return lines;
   }
 
   handleGdo0Alert(level, tick) {
@@ -287,6 +298,7 @@ class CC1101LiveVisualizer {
       this.lastGdo0Tick = tick;
       this.gdo0State = level;
       this.gdo0History.push({ t: Date.now(), v: level });
+      this.dirty = true;
       return;
     }
 
@@ -297,12 +309,37 @@ class CC1101LiveVisualizer {
 
     this.gdo0State = level;
     this.gdo0History.push({ t: Date.now(), v: level });
+    this.dirty = true;
   }
 
   handleGdo2Alert(level) {
     if (this.stopping) return;
     this.gdo2State = level;
     this.gdo2History.push({ t: Date.now(), v: level });
+    this.dirty = true;
+  }
+
+  renderScreen(lines) {
+    const width = process.stdout.columns || this.options.width + 16;
+    const normalized = lines.map((line) => {
+      const clipped = line.length > width ? line.slice(0, width) : line;
+      return `${CLEAR_LINE}${clipped}`;
+    });
+
+    while (normalized.length < this.screenLineCount) {
+      normalized.push(CLEAR_LINE);
+    }
+
+    const output = `${CURSOR_HOME}${normalized.join("\n")}`;
+    const rendered = normalized.join("\n");
+
+    if (rendered === this.lastScreen) {
+      return;
+    }
+
+    this.lastScreen = rendered;
+    this.screenLineCount = normalized.length;
+    this.options.onRender(output);
   }
 
   async start() {
@@ -316,6 +353,9 @@ class CC1101LiveVisualizer {
     this.gdo2History = [{ t: Date.now(), v: 0 }];
     this.rssiHistory = [];
     this.triggerWindows = [];
+    this.lastScreen = "";
+    this.screenLineCount = 0;
+    this.dirty = true;
 
     this.radio = new CC1101Driver({
       bus: this.options.bus,
@@ -338,6 +378,11 @@ class CC1101LiveVisualizer {
     });
     await sleep(100);
 
+    process.stdout.write(ALT_SCREEN_ON);
+    process.stdout.write(CURSOR_HIDE);
+    process.stdout.write(CURSOR_HOME);
+    this.ownsScreen = true;
+
     this.gdo0Pin.on("alert", (level, tick) => this.handleGdo0Alert(level, tick));
     this.gdo2Pin.on("alert", (level) => this.handleGdo2Alert(level));
     this.pollPromise = this.runPollLoop().finally(() => {
@@ -355,6 +400,7 @@ class CC1101LiveVisualizer {
 
       if (rssi !== null) {
         this.rssiHistory.push({ t: now, v: rssi });
+        this.dirty = true;
         if (rssi < this.options.threshold) {
           this.addTrigger(now);
         }
@@ -369,7 +415,10 @@ class CC1101LiveVisualizer {
     while (!this.stopping) {
       const now = Date.now();
       this.cleanupOld(now);
-      this.options.onRender(this.buildScreen(now));
+      if (this.dirty) {
+        this.renderScreen(this.buildScreen(now));
+        this.dirty = false;
+      }
       await sleep(this.options.redrawMs);
     }
   }
@@ -404,6 +453,12 @@ class CC1101LiveVisualizer {
 
     if (this.pollPromise) await this.pollPromise.catch(() => {});
     if (this.renderPromise) await this.renderPromise.catch(() => {});
+
+    if (this.ownsScreen) {
+      process.stdout.write(CURSOR_SHOW);
+      process.stdout.write(ALT_SCREEN_OFF);
+      this.ownsScreen = false;
+    }
   }
 }
 

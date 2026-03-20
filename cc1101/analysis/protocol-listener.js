@@ -1,10 +1,10 @@
 // @ts-check
 
 const { CC1101ProtocolDetector } = require("./protocol-detector");
+const { renderSignalSummary } = require("./signal-renderer");
 const {
   compactFrame,
   decodeByProtocol,
-  renderBars,
 } = require("./protocol-analysis");
 
 /**
@@ -43,7 +43,15 @@ class CC1101ProtocolListener {
         this.options.onMessage(`edges:        ${candidate.frame.length}`);
         this.options.onMessage(`units:        ${units.join(",")}`);
         this.options.onMessage(`compact:      ${compactFrame(candidate.frame)}`);
-        this.options.onMessage(`bars:         ${renderBars(units)}`);
+        for (const line of renderSignalSummary({
+          label: "decoded",
+          units,
+          levels: candidate.frame.map((edge) => edge.level),
+          durationsUs: candidate.frame.map((edge) => edge.dtUs),
+          snappedUs: candidate.frame.map((edge) => edge.snappedUs),
+        })) {
+          this.options.onMessage(line);
+        }
         this.options.onMessage(`bits:         ${decoded.bits}`);
         this.options.onMessage(`cleanBits:    ${decoded.cleanBits}`);
         this.options.onMessage(`details:      ${decoded.details}`);

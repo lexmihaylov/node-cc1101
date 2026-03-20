@@ -5,10 +5,10 @@ const { CC1101Driver } = require("../driver");
 const { STATUS } = require("../constants");
 const { BAND, MODULATION, RADIO_MODE } = require("../profiles");
 const { sleep } = require("../utils");
+const { renderSignalSummary } = require("./signal-renderer");
 const {
   compactFrame,
   quantizeEdges,
-  renderBars,
   scoreFrame,
   splitBySilence,
   trimHistory,
@@ -85,7 +85,15 @@ class CC1101FixedTimingDetector {
           this.options.onMessage(`    snappedUs:   ${frame.map((edge) => edge.snappedUs).join(",")}`);
           this.options.onMessage(`    units:       ${frame.map((edge) => edge.units).join(",")}`);
           this.options.onMessage(`    compact:     ${compactFrame(frame)}`);
-          this.options.onMessage(`    bars:        ${renderBars(frame.map((edge) => edge.units))}`);
+          for (const line of renderSignalSummary({
+            label: `frame ${idx + 1}`,
+            units: frame.map((edge) => edge.units),
+            levels: frame.map((edge) => edge.level),
+            durationsUs: frame.map((edge) => edge.dtUs),
+            snappedUs: frame.map((edge) => edge.snappedUs),
+          })) {
+            this.options.onMessage(`    ${line}`);
+          }
         });
         this.options.onMessage("");
       }),

@@ -5,7 +5,8 @@ const { CC1101Driver } = require("../driver");
 const { STATUS } = require("../constants");
 const { BAND, MODULATION, RADIO_MODE } = require("../profiles");
 const { sleep } = require("../utils");
-const { renderBars, renderWaveform, summarizeFrame } = require("./raw-analysis");
+const { summarizeFrame } = require("./raw-analysis");
+const { renderSignalSummary } = require("./signal-renderer");
 
 /**
  * @typedef {import("./raw-analysis").RawFrame} RawFrame
@@ -52,10 +53,14 @@ class CC1101RawListener {
         this.options.onMessage(`edges:       ${frame.edges}`);
         this.options.onMessage(`levels:      ${frame.levels.join(",")}`);
         this.options.onMessage(`durations:   ${frame.durationsUs.join(",")}`);
-        this.options.onMessage(`bars:        ${renderBars(frame.durationsUs)}`);
-        this.options.onMessage(
-          `wave:        ${renderWaveform(frame.durationsUs, 100, frame.levels[0] ?? 1)}`
-        );
+        for (const line of renderSignalSummary({
+          label: "raw",
+          units: frame.durationsUs,
+          levels: frame.levels,
+          durationsUs: frame.durationsUs,
+        })) {
+          this.options.onMessage(line);
+        }
         this.options.onMessage("");
 
         if (summary) {
@@ -65,8 +70,12 @@ class CC1101RawListener {
           this.options.onMessage(`edges:       ${summary.edges}`);
           this.options.onMessage(`baseUnit:    ~${summary.baseUnitUs} us`);
           this.options.onMessage(`units:       ${summary.units.join(",")}`);
-          this.options.onMessage(`bars:        ${renderBars(summary.units)}`);
-          this.options.onMessage(`wave:        ${renderWaveform(summary.units)}`);
+          for (const line of renderSignalSummary({
+            label: "analyzed",
+            units: summary.units,
+          })) {
+            this.options.onMessage(line);
+          }
 
           summary.segments.forEach((segment, index) => {
             this.options.onMessage(`segment ${index + 1} units:   ${segment.units.join(",")}`);

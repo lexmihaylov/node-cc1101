@@ -3,8 +3,8 @@
 const { Gpio } = require("pigpio");
 const { CC1101Driver } = require("../driver");
 const { sleep } = require("../utils");
-const { renderBars } = require("./raw-analysis");
 const { loadCaptureFile } = require("./capture-file");
+const { renderSignalSummary } = require("./signal-renderer");
 
 /**
  * @typedef {"raw" | "normalized"} ReplayMode
@@ -139,7 +139,14 @@ class CC1101WindowReplayer {
       this.options.onMessage(`steps:         ${replay.durationsUs.length}`);
       this.options.onMessage(`repeats:       ${this.options.repeats}`);
       this.options.onMessage(`repeatGapUs:   ${this.options.repeatGapUs}`);
-      this.options.onMessage(`bars:          ${renderBars(replay.units, 160)}`);
+      for (const line of renderSignalSummary({
+        label: "replay",
+        units: replay.units,
+        levels: replay.levels,
+        durationsUs: replay.durationsUs,
+      })) {
+        this.options.onMessage(line);
+      }
       this.options.onMessage("");
 
       if (this.options.preDelayMs > 0) {
