@@ -210,6 +210,8 @@ cc1101> capture replay /tmp/rf-captures/capture-001.json 24 normalized 10 400
 - `tx <hex-bytes...>`
 - `idle`
 
+Detailed shell documentation is available in [SHELL.md](/home/lex/projects/node-cc1101/SHELL.md).
+
 ## Project structure
 
 - [`index.js`](/home/lex/projects/node-cc1101/index.js): public package entrypoint
@@ -233,3 +235,5 @@ Syntax check:
 ```bash
 npm run check
 ```
+
+Full library API documentation is available in [API.md](/home/lex/projects/node-cc1101/API.md).
