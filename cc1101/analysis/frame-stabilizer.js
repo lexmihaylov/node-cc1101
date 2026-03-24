@@ -5,6 +5,7 @@ const { CC1101Driver } = require("../driver");
 const { STATUS } = require("../constants");
 const { BAND, MODULATION, RADIO_MODE } = require("../profiles");
 const { sleep } = require("../utils");
+const { shouldAcceptTriggerRssi } = require("./rssi-filter");
 const { renderSignalSummary } = require("./signal-renderer");
 const {
   bestAlignment,
@@ -49,6 +50,7 @@ const {
  * @property {number=} tolerance
  * @property {number=} maxShift
  * @property {number=} recentPresses
+ * @property {number | null=} rssiTolerance
  * @property {(message: string) => void=} onMessage
  * @property {(result: FrameStabilizerResult) => void=} onFrame
  */
@@ -78,6 +80,7 @@ class CC1101FrameStabilizer {
       tolerance: options.tolerance ?? 1,
       maxShift: options.maxShift ?? 10,
       recentPresses: options.recentPresses ?? 12,
+      rssiTolerance: options.rssiTolerance ?? null,
       onMessage: options.onMessage ?? ((message) => console.log(message)),
       onFrame: options.onFrame ?? ((result) => {
         const units = result.bestFrame.map((edge) => edge.units);
@@ -144,6 +147,7 @@ class CC1101FrameStabilizer {
     this.edges = [];
     /** @type {Array<{ pressId: number, tokens: Array<{ level: number, units: number }> }>} */
     this.recentBestFrames = [];
+    this.lastAcceptedTriggerRssi = null;
   }
 
   async getRssiRaw() {
@@ -177,6 +181,7 @@ class CC1101FrameStabilizer {
     this.pendingTrigger = null;
     this.edges = [];
     this.recentBestFrames = [];
+    this.lastAcceptedTriggerRssi = null;
 
     this.radio = new CC1101Driver({ bus: this.options.bus, device: this.options.device, speedHz: this.options.speedHz });
     this.gdo0Pin = new Gpio(this.options.gdo0, { mode: Gpio.INPUT, alert: true });
@@ -192,7 +197,7 @@ class CC1101FrameStabilizer {
     await sleep(100);
 
     this.options.onMessage(
-      `frame stabilizer started gdo0=${this.options.gdo0} threshold=${this.options.threshold} baseUs=${this.options.baseUs} lookbackMs=${this.options.lookbackMs} settleMs=${this.options.settleMs}`
+      `frame stabilizer started gdo0=${this.options.gdo0} threshold=${this.options.threshold} baseUs=${this.options.baseUs} lookbackMs=${this.options.lookbackMs} settleMs=${this.options.settleMs} rssiTolerance=${this.options.rssiTolerance ?? "off"}`
     );
 
     this.gdo0Pin.on("alert", (level, tick) => this.handleAlert(level, tick));
@@ -207,6 +212,14 @@ class CC1101FrameStabilizer {
       const rssi = await this.getRssiRaw().catch(() => null);
 
       if (!this.pendingTrigger && now >= this.cooldownUntil && rssi !== null && rssi < this.options.threshold) {
+        if (!shouldAcceptTriggerRssi(this.lastAcceptedTriggerRssi, rssi, this.options.rssiTolerance)) {
+          this.options.onMessage(
+            `ignored rssi=${rssi} reference=${this.lastAcceptedTriggerRssi} tolerance=${this.options.rssiTolerance}`
+          );
+          this.cooldownUntil = now + 100;
+          await sleep(this.options.pollMs);
+          continue;
+        }
         this.pendingTrigger = { triggerTimeMs: now, triggerRssi: rssi };
         this.options.onMessage(`trigger rssi=${rssi}`);
       }
@@ -265,6 +278,7 @@ class CC1101FrameStabilizer {
               consensus,
               sourceCount: this.recentBestFrames.length,
             });
+            this.lastAcceptedTriggerRssi = this.pendingTrigger.triggerRssi;
           }
         }
 

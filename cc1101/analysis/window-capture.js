@@ -6,6 +6,7 @@ const { CC1101Driver } = require("../driver");
 const { STATUS, VALUE } = require("../constants");
 const { BAND, MODULATION, RADIO_MODE } = require("../profiles");
 const { sleep } = require("../utils");
+const { shouldAcceptTriggerRssi } = require("./rssi-filter");
 const { buildCaptureFilepath, saveCaptureFile } = require("./capture-file");
 const { renderSignalSummary } = require("./signal-renderer");
 
@@ -49,6 +50,7 @@ const { renderSignalSummary } = require("./signal-renderer");
  * @property {number=} pollMs
  * @property {number=} minDtUs
  * @property {boolean=} niceSnap
+ * @property {number | null=} rssiTolerance
  * @property {string=} outDir
  * @property {string=} prefix
  * @property {(message: string) => void=} onMessage
@@ -122,6 +124,7 @@ class CC1101WindowCapture {
       pollMs: options.pollMs ?? 5,
       minDtUs: options.minDtUs ?? 80,
       niceSnap: options.niceSnap ?? true,
+      rssiTolerance: options.rssiTolerance ?? null,
       outDir: options.outDir ?? "/tmp/rf-captures",
       prefix: options.prefix ?? "capture",
       onMessage: options.onMessage ?? ((message) => console.log(message)),
@@ -152,6 +155,7 @@ class CC1101WindowCapture {
     this.cooldownUntil = 0;
     this.pendingTrigger = null;
     this.edges = [];
+    this.lastAcceptedTriggerRssi = null;
   }
 
   async getRssiRaw() {
@@ -197,6 +201,7 @@ class CC1101WindowCapture {
     this.cooldownUntil = 0;
     this.pendingTrigger = null;
     this.edges = [];
+    this.lastAcceptedTriggerRssi = null;
 
     fs.mkdirSync(this.options.outDir, { recursive: true });
 
@@ -228,7 +233,7 @@ class CC1101WindowCapture {
     await sleep(100);
 
     this.options.onMessage(
-      `window capture started rxDataGpio=${this.options.rxDataGpio} cc1101DataGdo=gdo0 cc1101AuxGdo=gdo2:pqi threshold=${this.options.threshold} baseUs=${this.options.baseUs} beforeMs=${this.options.beforeMs} afterMs=${this.options.afterMs} outDir=${this.options.outDir}`
+      `window capture started rxDataGpio=${this.options.rxDataGpio} cc1101DataGdo=gdo0 cc1101AuxGdo=gdo2:pqi threshold=${this.options.threshold} baseUs=${this.options.baseUs} beforeMs=${this.options.beforeMs} afterMs=${this.options.afterMs} outDir=${this.options.outDir} rssiTolerance=${this.options.rssiTolerance ?? "off"}`
     );
 
     this.rxDataPin.on("alert", (level, tick) => this.handleAlert(level, tick));
@@ -248,6 +253,14 @@ class CC1101WindowCapture {
         rssi !== null &&
         rssi < this.options.threshold
       ) {
+        if (!shouldAcceptTriggerRssi(this.lastAcceptedTriggerRssi, rssi, this.options.rssiTolerance)) {
+          this.options.onMessage(
+            `ignored rssi=${rssi} reference=${this.lastAcceptedTriggerRssi} tolerance=${this.options.rssiTolerance}`
+          );
+          this.cooldownUntil = now + 100;
+          await sleep(this.options.pollMs);
+          continue;
+        }
         this.pendingTrigger = {
           triggerTimeMs: now,
           triggerRssi: rssi,
@@ -289,6 +302,7 @@ class CC1101WindowCapture {
         );
 
         saveCaptureFile(filepath, capture);
+        this.lastAcceptedTriggerRssi = capture.triggerRssi;
         this.options.onCapture(capture, filepath);
 
         this.pendingTrigger = null;

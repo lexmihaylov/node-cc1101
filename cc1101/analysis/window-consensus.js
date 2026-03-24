@@ -5,6 +5,7 @@ const { CC1101Driver } = require("../driver");
 const { STATUS } = require("../constants");
 const { BAND, MODULATION, RADIO_MODE } = require("../profiles");
 const { sleep } = require("../utils");
+const { shouldAcceptTriggerRssi } = require("./rssi-filter");
 const { renderSignalSummary } = require("./signal-renderer");
 const {
   buildConsensus,
@@ -53,12 +54,12 @@ const {
  * @property {boolean=} smoothUnits
  * @property {number=} tolerance
  * @property {number=} keepPresses
+ * @property {number | null=} rssiTolerance
  * @property {number | null=} sliceStart
  * @property {number | null=} sliceEnd
  * @property {(message: string) => void=} onMessage
  * @property {(result: WindowConsensusResult) => void=} onConsensus
  */
-
 class CC1101WindowConsensus {
   /**
    * @param {WindowConsensusOptions=} options
@@ -81,6 +82,7 @@ class CC1101WindowConsensus {
       smoothUnits: options.smoothUnits ?? true,
       tolerance: options.tolerance ?? 1,
       keepPresses: options.keepPresses ?? 10,
+      rssiTolerance: options.rssiTolerance ?? null,
       sliceStart: options.sliceStart ?? null,
       sliceEnd: options.sliceEnd ?? null,
       onMessage: options.onMessage ?? ((message) => console.log(message)),
@@ -130,6 +132,7 @@ class CC1101WindowConsensus {
     this.edges = [];
     /** @type {WindowConsensusPress[]} */
     this.recentSlices = [];
+    this.lastAcceptedTriggerRssi = null;
   }
 
   async getRssiRaw() {
@@ -171,6 +174,7 @@ class CC1101WindowConsensus {
     this.pendingTrigger = null;
     this.edges = [];
     this.recentSlices = [];
+    this.lastAcceptedTriggerRssi = null;
 
     this.radio = new CC1101Driver({
       bus: this.options.bus,
@@ -190,7 +194,7 @@ class CC1101WindowConsensus {
     await sleep(100);
 
     this.options.onMessage(
-      `window consensus started gdo0=${this.options.gdo0} threshold=${this.options.threshold} baseUs=${this.options.baseUs} beforeMs=${this.options.beforeMs} afterMs=${this.options.afterMs} minDtUs=${this.options.minDtUs} tolerance=${this.options.tolerance}`
+      `window consensus started gdo0=${this.options.gdo0} threshold=${this.options.threshold} baseUs=${this.options.baseUs} beforeMs=${this.options.beforeMs} afterMs=${this.options.afterMs} minDtUs=${this.options.minDtUs} tolerance=${this.options.tolerance} rssiTolerance=${this.options.rssiTolerance ?? "off"}`
     );
 
     this.gdo0Pin.on("alert", (level, tick) => this.handleAlert(level, tick));
@@ -205,6 +209,14 @@ class CC1101WindowConsensus {
       const rssi = await this.getRssiRaw().catch(() => null);
 
       if (!this.pendingTrigger && now >= this.cooldownUntil && rssi !== null && rssi < this.options.threshold) {
+        if (!shouldAcceptTriggerRssi(this.lastAcceptedTriggerRssi, rssi, this.options.rssiTolerance)) {
+          this.options.onMessage(
+            `ignored rssi=${rssi} reference=${this.lastAcceptedTriggerRssi} tolerance=${this.options.rssiTolerance}`
+          );
+          this.cooldownUntil = now + 100;
+          await sleep(this.options.pollMs);
+          continue;
+        }
         this.pendingTrigger = {
           triggerTimeMs: now,
           triggerRssi: rssi,
@@ -233,7 +245,11 @@ class CC1101WindowConsensus {
           this.recentSlices.shift();
         }
 
-        const consensus = buildConsensus(this.recentSlices.map((entry) => entry.slice), this.options.tolerance);
+        const consensus = buildConsensus(
+          this.recentSlices.map((entry) => entry.slice),
+          this.options.tolerance
+        );
+        this.lastAcceptedTriggerRssi = press.triggerRssi;
         this.options.onConsensus({
           press,
           consensus,

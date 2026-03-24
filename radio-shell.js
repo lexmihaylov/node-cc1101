@@ -193,23 +193,23 @@ class RadioShell {
     console.log("  listen start [pollMs]");
     console.log("  listen stop");
     console.log("  live view [gdo0] [gdo2] [threshold] [windowMs]");
-    console.log("  raw listen [gpio] [threshold] [captureMs]");
-    console.log("  signal detect [gdo0] [threshold] [lookbackMs] [settleMs]");
-    console.log("  timing fixed [gdo0] [threshold] [baseUs] [lookbackMs]");
-    console.log("  segment collect [gdo0] [threshold] [baseUs] [lookbackMs]");
+    console.log("  raw listen [gpio] [threshold] [captureMs] [rssiTolerance]");
+    console.log("  signal detect [gdo0] [threshold] [lookbackMs] [settleMs] [rssiTolerance]");
+    console.log("  timing fixed [gdo0] [threshold] [baseUs] [lookbackMs] [rssiTolerance]");
+    console.log("  segment collect [gdo0] [threshold] [baseUs] [lookbackMs] [rssiTolerance]");
     console.log("  burst match [gpio] [silenceGapUs] [minEdges] [baseUnitUs]");
     console.log("  canonical build [gpio] [silenceGapUs] [minEdges] [baseUnitUs]");
-    console.log("  stabilize frame [gdo0] [threshold] [baseUs] [lookbackMs]");
-    console.log("  consensus start [gdo0] [threshold] [baseUs] [beforeMs] [afterMs]");
-    console.log("  slice inspect [gdo0] [threshold] [baseUs] [beforeMs] [afterMs]");
-    console.log("  frame extract [gdo0] [gdo2] [threshold] [silenceGapUs] [minEdges]");
-    console.log("  capture save [rxDataGpio] [threshold] [baseUs] [beforeMs] [afterMs] [outDir]");
+    console.log("  stabilize frame [gdo0] [threshold] [baseUs] [lookbackMs] [rssiTolerance]");
+    console.log("  consensus start [gdo0] [threshold] [baseUs] [beforeMs] [afterMs] [rssiTolerance]");
+    console.log("  slice inspect [gdo0] [threshold] [baseUs] [beforeMs] [afterMs] [rssiTolerance]");
+    console.log("  frame extract [gdo0] [gdo2] [threshold] [silenceGapUs] [minEdges] [rssiTolerance]");
+    console.log("  capture save [rxDataGpio] [threshold] [baseUs] [beforeMs] [afterMs] [outDir] [rssiTolerance]");
     console.log("  capture show <file>");
     console.log("  capture replay <file> [txDataGpio] [mode] [repeats] [baseUs]");
-    console.log("  window capture [rxDataGpio] [threshold] [baseUs] [beforeMs] [afterMs] [outDir]");
+    console.log("  window capture [rxDataGpio] [threshold] [baseUs] [beforeMs] [afterMs] [outDir] [rssiTolerance]");
     console.log("  window replay <file> [txDataGpio] [mode] [repeats] [baseUs]");
-    console.log("  protocol detect [gdo0] [threshold] [baseUs]");
-    console.log("  protocol listen [name] [gdo0] [threshold] [baseUs] [tolerance]");
+    console.log("  protocol detect [gdo0] [threshold] [baseUs] [rssiTolerance]");
+    console.log("  protocol listen [name] [gdo0] [threshold] [baseUs] [tolerance] [rssiTolerance]");
     console.log("  protocol stop");
     console.log("  rssi [count] [intervalMs]");
     console.log("  tx <hex-bytes...>");
@@ -224,23 +224,23 @@ class RadioShell {
     console.log("  config set direct_async 433 ook");
     console.log("  gpio set async_serial_data high_impedance high_impedance");
     console.log("  live view 24 25 100 3000");
-    console.log("  raw listen 24 100 220");
-    console.log("  signal detect 24 100 1000 220");
-    console.log("  timing fixed 24 100 500 1000");
-    console.log("  segment collect 24 100 400 500");
+    console.log("  raw listen 24 100 220 6");
+    console.log("  signal detect 24 100 1000 220 6");
+    console.log("  timing fixed 24 100 500 1000 6");
+    console.log("  segment collect 24 100 400 500 6");
     console.log("  burst match 24 10000 16 0");
     console.log("  canonical build 24 10000 16 0");
-    console.log("  stabilize frame 24 100 500 1000");
-    console.log("  consensus start 24 100 400 1000 1000");
-    console.log("  slice inspect 24 100 400 1000 1000");
-    console.log("  frame extract 24 25 100 8000 12");
-    console.log("  capture save 24 100 400 1000 1000 /tmp/rf-captures");
+    console.log("  stabilize frame 24 100 500 1000 6");
+    console.log("  consensus start 24 100 400 1000 1000 6");
+    console.log("  slice inspect 24 100 400 1000 1000 6");
+    console.log("  frame extract 24 25 100 8000 12 6");
+    console.log("  capture save 24 100 400 1000 1000 /tmp/rf-captures 6");
     console.log("  capture show /tmp/rf-captures/capture-001.json");
     console.log("  capture replay /tmp/rf-captures/capture-001.json 24 normalized 10 400");
-    console.log("  window capture 24 100 400 1000 1000 /tmp/rf-captures");
+    console.log("  window capture 24 100 400 1000 1000 /tmp/rf-captures 6");
     console.log("  window replay /tmp/rf-captures/capture-001.json 24 normalized 10 400");
-    console.log("  protocol detect 24 100 375");
-    console.log("  protocol listen ev1527_like 24 100 375 1");
+    console.log("  protocol detect 24 100 375 6");
+    console.log("  protocol listen ev1527_like 24 100 375 1 6");
   }
 
   printConfig() {
@@ -364,7 +364,7 @@ class RadioShell {
     console.log("listening stopped");
   }
 
-  async startProtocolDetection(gdo0 = 24, threshold = 100, baseUs = 375) {
+  async startProtocolDetection(gdo0 = 24, threshold = 100, baseUs = 375, rssiTolerance) {
     await this.stopListening();
     await this.stopProtocolRuntime();
     await this.disconnect();
@@ -376,6 +376,7 @@ class RadioShell {
       gdo0: Number(gdo0),
       threshold: Number(threshold),
       baseUs: Number(baseUs),
+      rssiTolerance: rssiTolerance !== undefined ? Number(rssiTolerance) : null,
       onMessage: (message) => {
         console.log(`[protocol] ${message}`);
       },
@@ -389,7 +390,8 @@ class RadioShell {
     gdo0 = 24,
     threshold = 100,
     baseUs = 375,
-    tolerance = 1
+    tolerance = 1,
+    rssiTolerance
   ) {
     await this.stopListening();
     await this.stopProtocolRuntime();
@@ -404,6 +406,7 @@ class RadioShell {
       threshold: Number(threshold),
       baseUs: Number(baseUs),
       tolerance: Number(tolerance),
+      rssiTolerance: rssiTolerance !== undefined ? Number(rssiTolerance) : null,
       onMessage: (message) => {
         console.log(`[protocol] ${message}`);
       },
@@ -412,7 +415,7 @@ class RadioShell {
     await this.protocolRuntime.start();
   }
 
-  async startRawListen(gpio = 24, threshold = 100, captureMs = 220) {
+  async startRawListen(gpio = 24, threshold = 100, captureMs = 220, rssiTolerance) {
     await this.stopListening();
     await this.stopProtocolRuntime();
     await this.disconnect();
@@ -424,6 +427,7 @@ class RadioShell {
       gpio: Number(gpio),
       threshold: Number(threshold),
       captureMs: Number(captureMs),
+      rssiTolerance: rssiTolerance !== undefined ? Number(rssiTolerance) : null,
       onMessage: (message) => {
         console.log(`[raw] ${message}`);
       },
@@ -453,7 +457,7 @@ class RadioShell {
     await this.protocolRuntime.start();
   }
 
-  async startSignalDetect(gdo0 = 24, threshold = 100, lookbackMs = 1000, settleMs = 220) {
+  async startSignalDetect(gdo0 = 24, threshold = 100, lookbackMs = 1000, settleMs = 220, rssiTolerance) {
     await this.stopListening();
     await this.stopProtocolRuntime();
     await this.disconnect();
@@ -466,6 +470,7 @@ class RadioShell {
       threshold: Number(threshold),
       lookbackMs: Number(lookbackMs),
       settleMs: Number(settleMs),
+      rssiTolerance: rssiTolerance !== undefined ? Number(rssiTolerance) : null,
       onMessage: (message) => {
         console.log(`[signal] ${message}`);
       },
@@ -474,7 +479,7 @@ class RadioShell {
     await this.protocolRuntime.start();
   }
 
-  async startFixedTiming(gdo0 = 24, threshold = 100, baseUs = 500, lookbackMs = 1000) {
+  async startFixedTiming(gdo0 = 24, threshold = 100, baseUs = 500, lookbackMs = 1000, rssiTolerance) {
     await this.stopListening();
     await this.stopProtocolRuntime();
     await this.disconnect();
@@ -487,6 +492,7 @@ class RadioShell {
       threshold: Number(threshold),
       baseUs: Number(baseUs),
       lookbackMs: Number(lookbackMs),
+      rssiTolerance: rssiTolerance !== undefined ? Number(rssiTolerance) : null,
       onMessage: (message) => {
         console.log(`[timing] ${message}`);
       },
@@ -495,7 +501,7 @@ class RadioShell {
     await this.protocolRuntime.start();
   }
 
-  async startSegmentCollect(gdo0 = 24, threshold = 100, baseUs = 400, lookbackMs = 500) {
+  async startSegmentCollect(gdo0 = 24, threshold = 100, baseUs = 400, lookbackMs = 500, rssiTolerance) {
     await this.stopListening();
     await this.stopProtocolRuntime();
     await this.disconnect();
@@ -508,6 +514,7 @@ class RadioShell {
       threshold: Number(threshold),
       baseUs: Number(baseUs),
       lookbackMs: Number(lookbackMs),
+      rssiTolerance: rssiTolerance !== undefined ? Number(rssiTolerance) : null,
       onMessage: (message) => {
         console.log(`[segment] ${message}`);
       },
@@ -558,7 +565,7 @@ class RadioShell {
     await this.protocolRuntime.start();
   }
 
-  async startFrameStabilize(gdo0 = 24, threshold = 100, baseUs = 500, lookbackMs = 1000) {
+  async startFrameStabilize(gdo0 = 24, threshold = 100, baseUs = 500, lookbackMs = 1000, rssiTolerance) {
     await this.stopListening();
     await this.stopProtocolRuntime();
     await this.disconnect();
@@ -571,6 +578,7 @@ class RadioShell {
       threshold: Number(threshold),
       baseUs: Number(baseUs),
       lookbackMs: Number(lookbackMs),
+      rssiTolerance: rssiTolerance !== undefined ? Number(rssiTolerance) : null,
       onMessage: (message) => {
         console.log(`[stabilize] ${message}`);
       },
@@ -579,7 +587,14 @@ class RadioShell {
     await this.protocolRuntime.start();
   }
 
-  async startConsensus(gdo0 = 24, threshold = 100, baseUs = 400, beforeMs = 1000, afterMs = 1000) {
+  async startConsensus(
+    gdo0 = 24,
+    threshold = 100,
+    baseUs = 400,
+    beforeMs = 1000,
+    afterMs = 1000,
+    rssiTolerance
+  ) {
     await this.stopListening();
     await this.stopProtocolRuntime();
     await this.disconnect();
@@ -593,6 +608,7 @@ class RadioShell {
       baseUs: Number(baseUs),
       beforeMs: Number(beforeMs),
       afterMs: Number(afterMs),
+      rssiTolerance: rssiTolerance !== undefined ? Number(rssiTolerance) : null,
       onMessage: (message) => {
         console.log(`[consensus] ${message}`);
       },
@@ -601,7 +617,7 @@ class RadioShell {
     await this.protocolRuntime.start();
   }
 
-  async startSliceInspect(gdo0 = 24, threshold = 100, baseUs = 400, beforeMs = 1000, afterMs = 1000) {
+  async startSliceInspect(gdo0 = 24, threshold = 100, baseUs = 400, beforeMs = 1000, afterMs = 1000, rssiTolerance) {
     await this.stopListening();
     await this.stopProtocolRuntime();
     await this.disconnect();
@@ -615,6 +631,7 @@ class RadioShell {
       baseUs: Number(baseUs),
       beforeMs: Number(beforeMs),
       afterMs: Number(afterMs),
+      rssiTolerance: rssiTolerance !== undefined ? Number(rssiTolerance) : null,
       onMessage: (message) => {
         console.log(`[slice] ${message}`);
       },
@@ -623,7 +640,7 @@ class RadioShell {
     await this.protocolRuntime.start();
   }
 
-  async startFrameExtract(gdo0 = 24, gdo2 = 25, threshold = 100, silenceGapUs = 8000, minEdges = 12) {
+  async startFrameExtract(gdo0 = 24, gdo2 = 25, threshold = 100, silenceGapUs = 8000, minEdges = 12, rssiTolerance) {
     await this.stopListening();
     await this.stopProtocolRuntime();
     await this.disconnect();
@@ -637,6 +654,7 @@ class RadioShell {
       threshold: Number(threshold),
       silenceGapUs: Number(silenceGapUs),
       minEdges: Number(minEdges),
+      rssiTolerance: rssiTolerance !== undefined ? Number(rssiTolerance) : null,
       onMessage: (message) => {
         console.log(`[frame] ${message}`);
       },
@@ -651,7 +669,8 @@ class RadioShell {
     baseUs = 400,
     beforeMs = 1000,
     afterMs = 1000,
-    outDir = "/tmp/rf-captures"
+    outDir = "/tmp/rf-captures",
+    rssiTolerance
   ) {
     await this.stopListening();
     await this.stopProtocolRuntime();
@@ -667,6 +686,7 @@ class RadioShell {
       beforeMs: Number(beforeMs),
       afterMs: Number(afterMs),
       outDir: String(outDir),
+      rssiTolerance: rssiTolerance !== undefined ? Number(rssiTolerance) : null,
       onMessage: (message) => {
         console.log(`[window] ${message}`);
       },
@@ -675,8 +695,8 @@ class RadioShell {
     await this.protocolRuntime.start();
   }
 
-  async saveCapture(rxDataGpio = 24, threshold = 100, baseUs = 400, beforeMs = 1000, afterMs = 1000, outDir = "/tmp/rf-captures") {
-    await this.startWindowCapture(rxDataGpio, threshold, baseUs, beforeMs, afterMs, outDir);
+  async saveCapture(rxDataGpio = 24, threshold = 100, baseUs = 400, beforeMs = 1000, afterMs = 1000, outDir = "/tmp/rf-captures", rssiTolerance) {
+    await this.startWindowCapture(rxDataGpio, threshold, baseUs, beforeMs, afterMs, outDir, rssiTolerance);
   }
 
   async replayWindow(file, txDataGpio = 24, mode = "normalized", repeats = 10, baseUs) {
@@ -820,28 +840,32 @@ async function executeCommand(shell, line, onExit) {
     await shell.startRawListen(
       Number(rest[0] ?? 24),
       Number(rest[1] ?? 100),
-      Number(rest[2] ?? 220)
+      Number(rest[2] ?? 220),
+      rest[3] !== undefined ? Number(rest[3]) : undefined
     );
   } else if (command === "signal" && subcommand === "detect") {
     await shell.startSignalDetect(
       Number(rest[0] ?? 24),
       Number(rest[1] ?? 100),
       Number(rest[2] ?? 1000),
-      Number(rest[3] ?? 220)
+      Number(rest[3] ?? 220),
+      rest[4] !== undefined ? Number(rest[4]) : undefined
     );
   } else if (command === "timing" && subcommand === "fixed") {
     await shell.startFixedTiming(
       Number(rest[0] ?? 24),
       Number(rest[1] ?? 100),
       Number(rest[2] ?? 500),
-      Number(rest[3] ?? 1000)
+      Number(rest[3] ?? 1000),
+      rest[4] !== undefined ? Number(rest[4]) : undefined
     );
   } else if (command === "segment" && subcommand === "collect") {
     await shell.startSegmentCollect(
       Number(rest[0] ?? 24),
       Number(rest[1] ?? 100),
       Number(rest[2] ?? 400),
-      Number(rest[3] ?? 500)
+      Number(rest[3] ?? 500),
+      rest[4] !== undefined ? Number(rest[4]) : undefined
     );
   } else if (command === "burst" && subcommand === "match") {
     await shell.startBurstMatch(
@@ -862,7 +886,8 @@ async function executeCommand(shell, line, onExit) {
       Number(rest[0] ?? 24),
       Number(rest[1] ?? 100),
       Number(rest[2] ?? 500),
-      Number(rest[3] ?? 1000)
+      Number(rest[3] ?? 1000),
+      rest[4] !== undefined ? Number(rest[4]) : undefined
     );
   } else if (command === "consensus" && subcommand === "start") {
     await shell.startConsensus(
@@ -870,7 +895,8 @@ async function executeCommand(shell, line, onExit) {
       Number(rest[1] ?? 100),
       Number(rest[2] ?? 400),
       Number(rest[3] ?? 1000),
-      Number(rest[4] ?? 1000)
+      Number(rest[4] ?? 1000),
+      rest[5] !== undefined ? Number(rest[5]) : undefined
     );
   } else if (command === "slice" && subcommand === "inspect") {
     await shell.startSliceInspect(
@@ -878,7 +904,8 @@ async function executeCommand(shell, line, onExit) {
       Number(rest[1] ?? 100),
       Number(rest[2] ?? 400),
       Number(rest[3] ?? 1000),
-      Number(rest[4] ?? 1000)
+      Number(rest[4] ?? 1000),
+      rest[5] !== undefined ? Number(rest[5]) : undefined
     );
   } else if (command === "frame" && subcommand === "extract") {
     await shell.startFrameExtract(
@@ -886,7 +913,8 @@ async function executeCommand(shell, line, onExit) {
       Number(rest[1] ?? 25),
       Number(rest[2] ?? 100),
       Number(rest[3] ?? 8000),
-      Number(rest[4] ?? 12)
+      Number(rest[4] ?? 12),
+      rest[5] !== undefined ? Number(rest[5]) : undefined
     );
   } else if (command === "capture" && subcommand === "save") {
     await shell.saveCapture(
@@ -895,7 +923,8 @@ async function executeCommand(shell, line, onExit) {
       Number(rest[2] ?? 400),
       Number(rest[3] ?? 1000),
       Number(rest[4] ?? 1000),
-      rest[5] ?? "/tmp/rf-captures"
+      rest[5] ?? "/tmp/rf-captures",
+      rest[6] !== undefined ? Number(rest[6]) : undefined
     );
   } else if (command === "capture" && subcommand === "show") {
     shell.showCapture(rest[0]);
@@ -914,7 +943,8 @@ async function executeCommand(shell, line, onExit) {
       Number(rest[2] ?? 400),
       Number(rest[3] ?? 1000),
       Number(rest[4] ?? 1000),
-      rest[5] ?? "/tmp/rf-captures"
+      rest[5] ?? "/tmp/rf-captures",
+      rest[6] !== undefined ? Number(rest[6]) : undefined
     );
   } else if (command === "window" && subcommand === "replay") {
     await shell.replayWindow(
@@ -928,7 +958,8 @@ async function executeCommand(shell, line, onExit) {
     await shell.startProtocolDetection(
       Number(rest[0] ?? 24),
       Number(rest[1] ?? 100),
-      Number(rest[2] ?? 375)
+      Number(rest[2] ?? 375),
+      rest[3] !== undefined ? Number(rest[3]) : undefined
     );
   } else if (command === "protocol" && subcommand === "listen") {
     await shell.startProtocolListen(
@@ -936,7 +967,8 @@ async function executeCommand(shell, line, onExit) {
       Number(rest[1] ?? 24),
       Number(rest[2] ?? 100),
       Number(rest[3] ?? 375),
-      Number(rest[4] ?? 1)
+      Number(rest[4] ?? 1),
+      rest[5] !== undefined ? Number(rest[5]) : undefined
     );
   } else if (command === "protocol" && subcommand === "stop") {
     await shell.stopProtocolRuntime();

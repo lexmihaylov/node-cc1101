@@ -5,6 +5,7 @@ const { CC1101Driver } = require("../driver");
 const { STATUS } = require("../constants");
 const { BAND, MODULATION, RADIO_MODE } = require("../profiles");
 const { sleep } = require("../utils");
+const { shouldAcceptTriggerRssi } = require("./rssi-filter");
 const { renderSignalSummary } = require("./signal-renderer");
 const {
   compactFrame,
@@ -42,6 +43,7 @@ const {
  * @property {number=} silenceUnits
  * @property {number=} maxFrames
  * @property {boolean=} niceSnap
+ * @property {number | null=} rssiTolerance
  * @property {(message: string) => void=} onMessage
  * @property {(result: FixedTimingDetectionResult) => void=} onDetection
  */
@@ -68,6 +70,7 @@ class CC1101FixedTimingDetector {
       silenceUnits: options.silenceUnits ?? 8,
       maxFrames: options.maxFrames ?? 6,
       niceSnap: options.niceSnap ?? true,
+      rssiTolerance: options.rssiTolerance ?? null,
       onMessage: options.onMessage ?? ((message) => console.log(message)),
       onDetection: options.onDetection ?? ((result) => {
         this.options.onMessage("---- fixed timing detection ----");
@@ -108,6 +111,7 @@ class CC1101FixedTimingDetector {
     this.cooldownUntil = 0;
     this.pendingTrigger = null;
     this.edges = [];
+    this.lastAcceptedTriggerRssi = null;
   }
 
   async getRssiRaw() {
@@ -140,6 +144,7 @@ class CC1101FixedTimingDetector {
     this.cooldownUntil = 0;
     this.pendingTrigger = null;
     this.edges = [];
+    this.lastAcceptedTriggerRssi = null;
 
     this.radio = new CC1101Driver({ bus: this.options.bus, device: this.options.device, speedHz: this.options.speedHz });
     this.gdo0Pin = new Gpio(this.options.gdo0, { mode: Gpio.INPUT, alert: true });
@@ -155,7 +160,7 @@ class CC1101FixedTimingDetector {
     await sleep(100);
 
     this.options.onMessage(
-      `fixed timing detector started gdo0=${this.options.gdo0} threshold=${this.options.threshold} baseUs=${this.options.baseUs} lookbackMs=${this.options.lookbackMs} settleMs=${this.options.settleMs}`
+      `fixed timing detector started gdo0=${this.options.gdo0} threshold=${this.options.threshold} baseUs=${this.options.baseUs} lookbackMs=${this.options.lookbackMs} settleMs=${this.options.settleMs} rssiTolerance=${this.options.rssiTolerance ?? "off"}`
     );
 
     this.gdo0Pin.on("alert", (level, tick) => this.handleAlert(level, tick));
@@ -169,6 +174,14 @@ class CC1101FixedTimingDetector {
       const now = Date.now();
       const rssi = await this.getRssiRaw().catch(() => null);
       if (!this.pendingTrigger && now >= this.cooldownUntil && rssi !== null && rssi < this.options.threshold) {
+        if (!shouldAcceptTriggerRssi(this.lastAcceptedTriggerRssi, rssi, this.options.rssiTolerance)) {
+          this.options.onMessage(
+            `ignored rssi=${rssi} reference=${this.lastAcceptedTriggerRssi} tolerance=${this.options.rssiTolerance}`
+          );
+          this.cooldownUntil = now + 100;
+          await sleep(this.options.pollMs);
+          continue;
+        }
         this.pendingTrigger = { triggerTimeMs: now, triggerRssi: rssi };
         this.options.onMessage(`trigger rssi=${rssi}`);
       }
@@ -190,6 +203,7 @@ class CC1101FixedTimingDetector {
             quantizedEdges: quantized,
             frames,
           });
+          this.lastAcceptedTriggerRssi = this.pendingTrigger.triggerRssi;
         }
 
         this.pendingTrigger = null;

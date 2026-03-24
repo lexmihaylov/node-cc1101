@@ -5,6 +5,7 @@ const { CC1101Driver } = require("../driver");
 const { STATUS } = require("../constants");
 const { BAND, MODULATION, RADIO_MODE } = require("../profiles");
 const { sleep } = require("../utils");
+const { shouldAcceptTriggerRssi } = require("./rssi-filter");
 const { summarizeFrame } = require("./raw-analysis");
 const { renderSignalSummary } = require("./signal-renderer");
 
@@ -24,6 +25,7 @@ const { renderSignalSummary } = require("./signal-renderer");
  * @property {number=} pretriggerUs
  * @property {number=} silenceGapUs
  * @property {number=} pollMs
+ * @property {number | null=} rssiTolerance
  * @property {(message: string) => void=} onMessage
  * @property {(frame: RawFrame, summary: RawFrameSummary | null) => void=} onFrame
  */
@@ -45,6 +47,7 @@ class CC1101RawListener {
       pretriggerUs: options.pretriggerUs ?? 10000,
       silenceGapUs: options.silenceGapUs ?? 10000,
       pollMs: options.pollMs ?? 5,
+      rssiTolerance: options.rssiTolerance ?? null,
       onMessage: options.onMessage ?? ((message) => console.log(message)),
       onFrame: options.onFrame ?? ((frame, summary) => {
         this.options.onMessage("---- raw trigger ----");
@@ -99,6 +102,7 @@ class CC1101RawListener {
     this.lastTick = 0;
     this.preBuffer = [];
     this.frameBuffer = [];
+    this.lastAcceptedTriggerRssi = null;
   }
 
   async getRssiRaw() {
@@ -161,6 +165,7 @@ class CC1101RawListener {
     };
 
     const summary = summarizeFrame(frame);
+    this.lastAcceptedTriggerRssi = frame.triggerRssi;
     this.options.onFrame(frame, summary);
 
     this.resetFrameBuffer();
@@ -206,6 +211,7 @@ class CC1101RawListener {
     this.captureUntil = 0;
     this.cooldownUntil = 0;
     this.currentTriggerRssi = null;
+    this.lastAcceptedTriggerRssi = null;
 
     this.radio = new CC1101Driver({
       bus: this.options.bus,
@@ -228,7 +234,7 @@ class CC1101RawListener {
     await sleep(100);
 
     this.options.onMessage(
-      `armed on RSSI < ${this.options.threshold}, capture=${this.options.captureMs}ms, minEdges=${this.options.minEdges}, pretrigger=${this.options.pretriggerUs}us, silenceGap=${this.options.silenceGapUs}us`
+      `armed on RSSI < ${this.options.threshold}, capture=${this.options.captureMs}ms, minEdges=${this.options.minEdges}, pretrigger=${this.options.pretriggerUs}us, silenceGap=${this.options.silenceGapUs}us, rssiTolerance=${this.options.rssiTolerance ?? "off"}`
     );
 
     this.input.on("alert", (level, tick) => this.handleAlert(level, tick));
@@ -243,6 +249,14 @@ class CC1101RawListener {
       const rssi = await this.getRssiRaw();
 
       if (!this.capturing && now >= this.cooldownUntil && rssi < this.options.threshold) {
+        if (!shouldAcceptTriggerRssi(this.lastAcceptedTriggerRssi, rssi, this.options.rssiTolerance)) {
+          this.options.onMessage(
+            `ignored rssi=${rssi} reference=${this.lastAcceptedTriggerRssi} tolerance=${this.options.rssiTolerance}`
+          );
+          this.cooldownUntil = now + 100;
+          await sleep(this.options.pollMs);
+          continue;
+        }
         this.beginCapture(rssi, now);
       }
 

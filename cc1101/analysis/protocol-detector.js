@@ -5,6 +5,7 @@ const { CC1101Driver } = require("../driver");
 const { STATUS } = require("../constants");
 const { BAND, MODULATION, RADIO_MODE } = require("../profiles");
 const { sleep } = require("../utils");
+const { shouldAcceptTriggerRssi } = require("./rssi-filter");
 const { renderSignalSummary } = require("./signal-renderer");
 const {
   compactFrame,
@@ -37,6 +38,7 @@ const {
  * @property {number=} silenceUnits
  * @property {number=} maxFrames
  * @property {boolean=} niceSnap
+ * @property {number | null=} rssiTolerance
  * @property {(message: string) => void=} onMessage
  * @property {(press: ProtocolPress, candidate: ProtocolCandidate) => void=} onCandidate
  *
@@ -78,6 +80,7 @@ class CC1101ProtocolDetector {
       silenceUnits: options.silenceUnits ?? 10,
       maxFrames: options.maxFrames ?? 4,
       niceSnap: options.niceSnap ?? true,
+      rssiTolerance: options.rssiTolerance ?? null,
       onMessage: options.onMessage ?? ((message) => console.log(message)),
       onCandidate: options.onCandidate ?? ((press, candidate) => {
         const units = candidate.frame.map((edge) => edge.units);
@@ -128,6 +131,7 @@ class CC1101ProtocolDetector {
       pressId: 0,
       cooldownUntil: 0,
       pendingTrigger: null,
+      lastAcceptedTriggerRssi: null,
       lastTick: 0,
       stopping: false,
     };
@@ -175,6 +179,7 @@ class CC1101ProtocolDetector {
     this.state.lastTick = 0;
     this.state.pendingTrigger = null;
     this.state.cooldownUntil = 0;
+    this.state.lastAcceptedTriggerRssi = null;
 
     this.radio = new CC1101Driver({
       bus: this.options.bus,
@@ -198,7 +203,7 @@ class CC1101ProtocolDetector {
     await sleep(100);
 
     this.options.onMessage(
-      `protocol detector started gdo0=${this.options.gdo0} threshold=${this.options.threshold} baseUs=${this.options.baseUs} lookbackMs=${this.options.lookbackMs} settleMs=${this.options.settleMs}`
+      `protocol detector started gdo0=${this.options.gdo0} threshold=${this.options.threshold} baseUs=${this.options.baseUs} lookbackMs=${this.options.lookbackMs} settleMs=${this.options.settleMs} rssiTolerance=${this.options.rssiTolerance ?? "off"}`
     );
 
     this.gdo0Pin.on("alert", (level, tick) => this.handleAlert(level, tick));
@@ -218,6 +223,14 @@ class CC1101ProtocolDetector {
         rssi !== null &&
         rssi < this.options.threshold
       ) {
+        if (!shouldAcceptTriggerRssi(this.state.lastAcceptedTriggerRssi, rssi, this.options.rssiTolerance)) {
+          this.options.onMessage(
+            `ignored rssi=${rssi} reference=${this.state.lastAcceptedTriggerRssi} tolerance=${this.options.rssiTolerance}`
+          );
+          this.state.cooldownUntil = now + 100;
+          await sleep(this.options.pollMs);
+          continue;
+        }
         this.state.pendingTrigger = {
           triggerTimeMs: now,
           triggerRssi: rssi,
@@ -253,6 +266,8 @@ class CC1101ProtocolDetector {
             for (const candidate of candidates) {
               this.options.onCandidate(press, candidate);
             }
+
+            this.state.lastAcceptedTriggerRssi = this.state.pendingTrigger.triggerRssi;
           }
         }
 

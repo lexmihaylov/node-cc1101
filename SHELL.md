@@ -79,21 +79,23 @@ Unless you override them in a command, the shell generally assumes:
 - `listen start [pollMs]`
 - `listen stop`
 - `live view [gdo0] [gdo2] [threshold] [windowMs]`
-- `raw listen [gpio] [threshold] [captureMs]`
-- `signal detect [gdo0] [threshold] [lookbackMs] [settleMs]`
-- `timing fixed [gdo0] [threshold] [baseUs] [lookbackMs]`
-- `segment collect [gdo0] [threshold] [baseUs] [lookbackMs]`
+- `raw listen [gpio] [threshold] [captureMs] [rssiTolerance]`
+- `signal detect [gdo0] [threshold] [lookbackMs] [settleMs] [rssiTolerance]`
+- `timing fixed [gdo0] [threshold] [baseUs] [lookbackMs] [rssiTolerance]`
+- `segment collect [gdo0] [threshold] [baseUs] [lookbackMs] [rssiTolerance]`
 - `burst match [gpio] [silenceGapUs] [minEdges] [baseUnitUs]`
 - `canonical build [gpio] [silenceGapUs] [minEdges] [baseUnitUs]`
-- `stabilize frame [gdo0] [threshold] [baseUs] [lookbackMs]`
-- `consensus start [gdo0] [threshold] [baseUs] [beforeMs] [afterMs]`
-- `slice inspect [gdo0] [threshold] [baseUs] [beforeMs] [afterMs]`
-- `frame extract [gdo0] [gdo2] [threshold] [silenceGapUs] [minEdges]`
-- `capture save [rxDataGpio] [threshold] [baseUs] [beforeMs] [afterMs] [outDir]`
+- `stabilize frame [gdo0] [threshold] [baseUs] [lookbackMs] [rssiTolerance]`
+- `consensus start [gdo0] [threshold] [baseUs] [beforeMs] [afterMs] [rssiTolerance]`
+- `slice inspect [gdo0] [threshold] [baseUs] [beforeMs] [afterMs] [rssiTolerance]`
+- `frame extract [gdo0] [gdo2] [threshold] [silenceGapUs] [minEdges] [rssiTolerance]`
+- `capture save [rxDataGpio] [threshold] [baseUs] [beforeMs] [afterMs] [outDir] [rssiTolerance]`
 - `capture show <file>`
 - `capture replay <file> [txDataGpio] [mode] [repeats] [baseUs]`
-- `protocol detect [gdo0] [threshold] [baseUs]`
-- `protocol listen [name] [gdo0] [threshold] [baseUs] [tolerance]`
+- `protocol detect [gdo0] [threshold] [baseUs] [rssiTolerance]`
+- `protocol listen [name] [gdo0] [threshold] [baseUs] [tolerance] [rssiTolerance]`
+
+For trigger-driven analysis commands, `rssiTolerance` is optional. When set, the first accepted trigger becomes the RSSI reference and later triggers are ignored unless they stay within `triggerRssi ± rssiTolerance`.
 - `protocol stop`
 - `rssi [count] [intervalMs]`
 - `tx <hex-bytes...>`
@@ -357,7 +359,7 @@ Notes:
 
 ## Direct async raw capture and signal inspection
 
-### `raw listen [gpio] [threshold] [captureMs]`
+### `raw listen [gpio] [threshold] [captureMs] [rssiTolerance]`
 
 Arms a raw trigger listener. When RSSI crosses the threshold, the shell captures a short burst of edges and prints a summarized view.
 
@@ -370,10 +372,10 @@ Arguments:
 Example:
 
 ```text
-cc1101> raw listen 24 100 220
+cc1101> raw listen 24 100 220 6
 ```
 
-### `signal detect [gdo0] [threshold] [lookbackMs] [settleMs]`
+### `signal detect [gdo0] [threshold] [lookbackMs] [settleMs] [rssiTolerance]`
 
 Detects candidate frames from a triggered RSSI event and estimates likely timing clusters automatically.
 
@@ -387,12 +389,12 @@ Arguments:
 Example:
 
 ```text
-cc1101> signal detect 24 100 1000 220
+cc1101> signal detect 24 100 1000 220 6
 ```
 
 Use this when you do not yet know the base timing.
 
-### `timing fixed [gdo0] [threshold] [baseUs] [lookbackMs]`
+### `timing fixed [gdo0] [threshold] [baseUs] [lookbackMs] [rssiTolerance]`
 
 Like `signal detect`, but quantizes using a fixed base timing instead of estimating one.
 
@@ -406,12 +408,12 @@ Arguments:
 Example:
 
 ```text
-cc1101> timing fixed 24 100 500 1000
+cc1101> timing fixed 24 100 500 1000 6
 ```
 
 Use this when you already know the protocol timing.
 
-### `segment collect [gdo0] [threshold] [baseUs] [lookbackMs]`
+### `segment collect [gdo0] [threshold] [baseUs] [lookbackMs] [rssiTolerance]`
 
 Collects triggered windows, quantizes them to units, splits them into segments, and prints recent summaries so you can compare repeated presses.
 
@@ -425,10 +427,10 @@ Arguments:
 Example:
 
 ```text
-cc1101> segment collect 24 100 400 500
+cc1101> segment collect 24 100 400 500 6
 ```
 
-### `slice inspect [gdo0] [threshold] [baseUs] [beforeMs] [afterMs]`
+### `slice inspect [gdo0] [threshold] [baseUs] [beforeMs] [afterMs] [rssiTolerance]`
 
 Captures a full trigger window and prints:
 
@@ -450,14 +452,14 @@ Arguments:
 Example:
 
 ```text
-cc1101> slice inspect 24 100 400 1000 1000
+cc1101> slice inspect 24 100 400 1000 1000 6
 ```
 
 This is useful when reverse-engineering frame boundaries manually.
 
 ## Protocol commands
 
-### `protocol detect [gdo0] [threshold] [baseUs]`
+### `protocol detect [gdo0] [threshold] [baseUs] [rssiTolerance]`
 
 Runs protocol detection against captured frames and prints ranked candidates.
 
@@ -470,10 +472,10 @@ Arguments:
 Example:
 
 ```text
-cc1101> protocol detect 24 100 375
+cc1101> protocol detect 24 100 375 6
 ```
 
-### `protocol listen [name] [gdo0] [threshold] [baseUs] [tolerance]`
+### `protocol listen [name] [gdo0] [threshold] [baseUs] [tolerance] [rssiTolerance]`
 
 Listens for a specific decoded protocol and prints decoded payloads.
 
@@ -488,7 +490,7 @@ Arguments:
 Example:
 
 ```text
-cc1101> protocol listen ev1527_like 24 100 375 1
+cc1101> protocol listen ev1527_like 24 100 375 1 6
 ```
 
 Currently supported protocol families are implemented in [`protocol-analysis.js`](/home/lex/projects/node-cc1101/cc1101/analysis/protocol-analysis.js).
@@ -505,7 +507,7 @@ cc1101> protocol stop
 
 ## Frame comparison and stabilization commands
 
-### `consensus start [gdo0] [threshold] [baseUs] [beforeMs] [afterMs]`
+### `consensus start [gdo0] [threshold] [baseUs] [beforeMs] [afterMs] [rssiTolerance]`
 
 Builds a running consensus across recent triggered slices. Useful for repeated key presses from the same remote.
 
@@ -516,14 +518,15 @@ Arguments:
 - `baseUs`: quantization base, default `400`
 - `beforeMs`: capture before trigger, default `1000`
 - `afterMs`: capture after trigger, default `1000`
+- `rssiTolerance`: optional raw RSSI delta for consensus membership; only recent presses within `triggerRssi ± rssiTolerance` are used
 
 Example:
 
 ```text
-cc1101> consensus start 24 100 400 1000 1000
+cc1101> consensus start 24 100 400 1000 1000 6
 ```
 
-### `stabilize frame [gdo0] [threshold] [baseUs] [lookbackMs]`
+### `stabilize frame [gdo0] [threshold] [baseUs] [lookbackMs] [rssiTolerance]`
 
 Selects the best candidate frame per trigger, compares it to previous best frames, and builds a consensus frame over time.
 
@@ -537,7 +540,7 @@ Arguments:
 Example:
 
 ```text
-cc1101> stabilize frame 24 100 500 1000
+cc1101> stabilize frame 24 100 500 1000 6
 ```
 
 ### `burst match [gpio] [silenceGapUs] [minEdges] [baseUnitUs]`
@@ -576,7 +579,7 @@ cc1101> canonical build 24 10000 16 0
 
 ## Frame extraction
 
-### `frame extract [gdo0] [gdo2] [threshold] [silenceGapUs] [minEdges]`
+### `frame extract [gdo0] [gdo2] [threshold] [silenceGapUs] [minEdges] [rssiTolerance]`
 
 Extracts a likely frame using:
 
@@ -595,12 +598,12 @@ Arguments:
 Example:
 
 ```text
-cc1101> frame extract 24 25 100 8000 12
+cc1101> frame extract 24 25 100 8000 12 6
 ```
 
 ## Capture and replay
 
-### `capture save [rxDataGpio] [threshold] [baseUs] [beforeMs] [afterMs] [outDir]`
+### `capture save [rxDataGpio] [threshold] [baseUs] [beforeMs] [afterMs] [outDir] [rssiTolerance]`
 
 Captures a trigger window and writes it to disk as a JSON capture file.
 
@@ -616,7 +619,7 @@ Arguments:
 Example:
 
 ```text
-cc1101> capture save 24 100 400 1000 1000 /tmp/rf-captures
+cc1101> capture save 24 100 400 1000 1000 /tmp/rf-captures 6
 ```
 
 ### `capture show <file>`
@@ -673,23 +676,23 @@ cc1101> tx aa 55 01
 
 ```text
 cc1101> config set direct_async 433 ook
-cc1101> signal detect 24 100 1000 220
-cc1101> timing fixed 24 100 375 1000
-cc1101> segment collect 24 100 375 500
+cc1101> signal detect 24 100 1000 220 6
+cc1101> timing fixed 24 100 375 1000 6
+cc1101> segment collect 24 100 375 500 6
 ```
 
 ### Build a more stable frame from repeated presses
 
 ```text
-cc1101> stabilize frame 24 100 500 1000
-cc1101> consensus start 24 100 400 1000 1000
+cc1101> stabilize frame 24 100 500 1000 6
+cc1101> consensus start 24 100 400 1000 1000 6
 cc1101> canonical build 24 10000 16 0
 ```
 
 ### Capture and replay a signal
 
 ```text
-cc1101> capture save 24 100 400 1000 1000 /tmp/rf-captures
+cc1101> capture save 24 100 400 1000 1000 /tmp/rf-captures 6
 cc1101> capture show /tmp/rf-captures/capture-001.json
 cc1101> capture replay /tmp/rf-captures/capture-001.json 24 normalized 10 400
 ```

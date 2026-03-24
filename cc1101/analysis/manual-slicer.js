@@ -5,6 +5,7 @@ const { CC1101Driver } = require("../driver");
 const { STATUS } = require("../constants");
 const { BAND, MODULATION, RADIO_MODE } = require("../profiles");
 const { sleep } = require("../utils");
+const { shouldAcceptTriggerRssi } = require("./rssi-filter");
 const { renderSignalSummary } = require("./signal-renderer");
 const {
   compactTokens,
@@ -44,6 +45,7 @@ const {
  * @property {boolean=} niceSnap
  * @property {boolean=} smoothUnits
  * @property {number=} rowSize
+ * @property {number | null=} rssiTolerance
  * @property {number | null=} sliceStart
  * @property {number | null=} sliceEnd
  * @property {(message: string) => void=} onMessage
@@ -80,6 +82,7 @@ class CC1101ManualSlicer {
       niceSnap: options.niceSnap ?? true,
       smoothUnits: options.smoothUnits ?? true,
       rowSize: options.rowSize ?? 10,
+      rssiTolerance: options.rssiTolerance ?? null,
       sliceStart: options.sliceStart ?? null,
       sliceEnd: options.sliceEnd ?? null,
       onMessage: options.onMessage ?? ((message) => console.log(message)),
@@ -195,6 +198,7 @@ class CC1101ManualSlicer {
     this.cooldownUntil = 0;
     this.pendingTrigger = null;
     this.edges = [];
+    this.lastAcceptedTriggerRssi = null;
   }
 
   async getRssiRaw() {
@@ -227,6 +231,7 @@ class CC1101ManualSlicer {
     this.cooldownUntil = 0;
     this.pendingTrigger = null;
     this.edges = [];
+    this.lastAcceptedTriggerRssi = null;
 
     this.radio = new CC1101Driver({ bus: this.options.bus, device: this.options.device, speedHz: this.options.speedHz });
     this.gdo0Pin = new Gpio(this.options.gdo0, { mode: Gpio.INPUT, alert: true });
@@ -242,7 +247,7 @@ class CC1101ManualSlicer {
     await sleep(100);
 
     this.options.onMessage(
-      `window slicer started gdo0=${this.options.gdo0} threshold=${this.options.threshold} baseUs=${this.options.baseUs} beforeMs=${this.options.beforeMs} afterMs=${this.options.afterMs} minDtUs=${this.options.minDtUs} smoothUnits=${this.options.smoothUnits}`
+      `window slicer started gdo0=${this.options.gdo0} threshold=${this.options.threshold} baseUs=${this.options.baseUs} beforeMs=${this.options.beforeMs} afterMs=${this.options.afterMs} minDtUs=${this.options.minDtUs} smoothUnits=${this.options.smoothUnits} rssiTolerance=${this.options.rssiTolerance ?? "off"}`
     );
 
     this.gdo0Pin.on("alert", (level, tick) => this.handleAlert(level, tick));
@@ -257,6 +262,14 @@ class CC1101ManualSlicer {
       const rssi = await this.getRssiRaw().catch(() => null);
 
       if (!this.pendingTrigger && now >= this.cooldownUntil && rssi !== null && rssi < this.options.threshold) {
+        if (!shouldAcceptTriggerRssi(this.lastAcceptedTriggerRssi, rssi, this.options.rssiTolerance)) {
+          this.options.onMessage(
+            `ignored rssi=${rssi} reference=${this.lastAcceptedTriggerRssi} tolerance=${this.options.rssiTolerance}`
+          );
+          this.cooldownUntil = now + 100;
+          await sleep(this.options.pollMs);
+          continue;
+        }
         this.pendingTrigger = { triggerTimeMs: now, triggerRssi: rssi };
         this.options.onMessage(`trigger rssi=${rssi}`);
       }
@@ -282,6 +295,7 @@ class CC1101ManualSlicer {
           sliceEnd: this.options.sliceEnd,
           smoothUnits: this.options.smoothUnits,
         });
+        this.lastAcceptedTriggerRssi = this.pendingTrigger.triggerRssi;
 
         this.pendingTrigger = null;
         this.cooldownUntil = now + this.options.cooldownMs;

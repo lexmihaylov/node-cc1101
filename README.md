@@ -169,11 +169,11 @@ cc1101> tx aa 55 01
 
 cc1101> config set direct_async 433 ook
 cc1101> live view 24 25 100 3000
-cc1101> protocol detect 24 100 375
-cc1101> raw listen 24 100 220
-cc1101> segment collect 24 100 400 500
-cc1101> consensus start 24 100 400 1000 1000
-cc1101> capture save 24 100 400 1000 1000 /tmp/rf-captures
+cc1101> protocol detect 24 100 375 6
+cc1101> raw listen 24 100 220 6
+cc1101> segment collect 24 100 400 500 6
+cc1101> consensus start 24 100 400 1000 1000 6
+cc1101> capture save 24 100 400 1000 1000 /tmp/rf-captures 6
 cc1101> capture replay /tmp/rf-captures/capture-001.json 24 normalized 10 400
 ```
 
@@ -195,21 +195,21 @@ Capture/replay wiring:
 - `listen start [pollMs]`
 - `listen stop`
 - `live view [gdo0] [gdo2] [threshold] [windowMs]`
-- `raw listen [gpio] [threshold] [captureMs]`
-- `signal detect [gdo0] [threshold] [lookbackMs] [settleMs]`
-- `timing fixed [gdo0] [threshold] [baseUs] [lookbackMs]`
-- `segment collect [gdo0] [threshold] [baseUs] [lookbackMs]`
+- `raw listen [gpio] [threshold] [captureMs] [rssiTolerance]`
+- `signal detect [gdo0] [threshold] [lookbackMs] [settleMs] [rssiTolerance]`
+- `timing fixed [gdo0] [threshold] [baseUs] [lookbackMs] [rssiTolerance]`
+- `segment collect [gdo0] [threshold] [baseUs] [lookbackMs] [rssiTolerance]`
 - `burst match [gpio] [silenceGapUs] [minEdges] [baseUnitUs]`
 - `canonical build [gpio] [silenceGapUs] [minEdges] [baseUnitUs]`
-- `stabilize frame [gdo0] [threshold] [baseUs] [lookbackMs]`
-- `consensus start [gdo0] [threshold] [baseUs] [beforeMs] [afterMs]`
-- `slice inspect [gdo0] [threshold] [baseUs] [beforeMs] [afterMs]`
-- `frame extract [gdo0] [gdo2] [threshold] [silenceGapUs] [minEdges]`
-- `capture save [rxDataGpio] [threshold] [baseUs] [beforeMs] [afterMs] [outDir]`
+- `stabilize frame [gdo0] [threshold] [baseUs] [lookbackMs] [rssiTolerance]`
+- `consensus start [gdo0] [threshold] [baseUs] [beforeMs] [afterMs] [rssiTolerance]`
+- `slice inspect [gdo0] [threshold] [baseUs] [beforeMs] [afterMs] [rssiTolerance]`
+- `frame extract [gdo0] [gdo2] [threshold] [silenceGapUs] [minEdges] [rssiTolerance]`
+- `capture save [rxDataGpio] [threshold] [baseUs] [beforeMs] [afterMs] [outDir] [rssiTolerance]`
 - `capture show <file>`
 - `capture replay <file> [txDataGpio] [mode] [repeats] [baseUs]`
-- `protocol detect [gdo0] [threshold] [baseUs]`
-- `protocol listen [name] [gdo0] [threshold] [baseUs] [tolerance]`
+- `protocol detect [gdo0] [threshold] [baseUs] [rssiTolerance]`
+- `protocol listen [name] [gdo0] [threshold] [baseUs] [tolerance] [rssiTolerance]`
 - `protocol stop`
 - `rssi [count] [intervalMs]`
 - `tx <hex-bytes...>`

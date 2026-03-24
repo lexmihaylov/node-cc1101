@@ -5,6 +5,7 @@ const { CC1101Driver } = require("../driver");
 const { STATUS } = require("../constants");
 const { BAND, GDO_SIGNAL, MODULATION, RADIO_MODE } = require("../profiles");
 const { sleep } = require("../utils");
+const { shouldAcceptTriggerRssi } = require("./rssi-filter");
 const { renderSignalSummary } = require("./signal-renderer");
 const {
   estimateBaseUnit,
@@ -41,6 +42,7 @@ const {
  * @property {number=} pollMs
  * @property {number=} minDtUs
  * @property {number=} segmentGapUnits
+ * @property {number | null=} rssiTolerance
  * @property {(message: string) => void=} onMessage
  * @property {(frame: ExtractedFrame) => void=} onFrame
  */
@@ -107,6 +109,7 @@ class CC1101FrameExtractor {
       pollMs: options.pollMs ?? 5,
       minDtUs: options.minDtUs ?? 20,
       segmentGapUnits: options.segmentGapUnits ?? 20,
+      rssiTolerance: options.rssiTolerance ?? null,
       onMessage: options.onMessage ?? ((message) => console.log(message)),
       onFrame: options.onFrame ?? ((frame) => {
         const baseUnitUs = estimateBaseUnit(frame.durationsUs);
@@ -177,6 +180,7 @@ class CC1101FrameExtractor {
     this.gdo2Active = false;
     this.pendingTrigger = null;
     this.cooldownUntil = 0;
+    this.lastAcceptedTriggerRssi = null;
   }
 
   trimHistory() {
@@ -294,6 +298,7 @@ class CC1101FrameExtractor {
     this.gdo2Active = false;
     this.pendingTrigger = null;
     this.cooldownUntil = 0;
+    this.lastAcceptedTriggerRssi = null;
 
     this.radio = new CC1101Driver({
       bus: this.options.bus,
@@ -321,7 +326,7 @@ class CC1101FrameExtractor {
     await sleep(100);
 
     this.options.onMessage(
-      `frame extractor started gdo0=${this.options.gdo0} gdo2=${this.options.gdo2} threshold=${this.options.threshold} silenceGapUs=${this.options.silenceGapUs} minEdges=${this.options.minEdges}`
+      `frame extractor started gdo0=${this.options.gdo0} gdo2=${this.options.gdo2} threshold=${this.options.threshold} silenceGapUs=${this.options.silenceGapUs} minEdges=${this.options.minEdges} rssiTolerance=${this.options.rssiTolerance ?? "off"}`
     );
 
     this.gdo2Pin.on("alert", (level) => this.handleGdo2Alert(level));
@@ -342,6 +347,14 @@ class CC1101FrameExtractor {
         rssi !== null &&
         rssi < this.options.threshold
       ) {
+        if (!shouldAcceptTriggerRssi(this.lastAcceptedTriggerRssi, rssi, this.options.rssiTolerance)) {
+          this.options.onMessage(
+            `ignored rssi=${rssi} reference=${this.lastAcceptedTriggerRssi} tolerance=${this.options.rssiTolerance}`
+          );
+          this.cooldownUntil = now + 100;
+          await sleep(this.options.pollMs);
+          continue;
+        }
         this.pendingTrigger = {
           triggerRssi: rssi,
           rssiBefore: rssi,
@@ -365,6 +378,7 @@ class CC1101FrameExtractor {
           );
 
           if (frame) {
+            this.lastAcceptedTriggerRssi = this.pendingTrigger.triggerRssi;
             this.options.onFrame(frame);
           }
 

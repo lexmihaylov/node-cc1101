@@ -5,6 +5,7 @@ const { CC1101Driver } = require("../driver");
 const { STATUS } = require("../constants");
 const { BAND, MODULATION, RADIO_MODE } = require("../profiles");
 const { sleep } = require("../utils");
+const { shouldAcceptTriggerRssi } = require("./rssi-filter");
 const { renderSignalSummary } = require("./signal-renderer");
 const {
   compactFrame,
@@ -41,6 +42,7 @@ const {
  * @property {number=} minSegmentEdges
  * @property {boolean=} niceSnap
  * @property {number=} keepPresses
+ * @property {number | null=} rssiTolerance
  * @property {(message: string) => void=} onMessage
  * @property {(press: CollectedPress, recentPresses: CollectedPress[]) => void=} onPress
  */
@@ -67,6 +69,7 @@ class CC1101SegmentCollector {
       minSegmentEdges: options.minSegmentEdges ?? 6,
       niceSnap: options.niceSnap ?? true,
       keepPresses: options.keepPresses ?? 10,
+      rssiTolerance: options.rssiTolerance ?? null,
       onMessage: options.onMessage ?? ((message) => console.log(message)),
       onPress: options.onPress ?? ((press, recentPresses) => {
         this.options.onMessage("============================================================");
@@ -128,6 +131,7 @@ class CC1101SegmentCollector {
     this.edges = [];
     /** @type {CollectedPress[]} */
     this.recentPresses = [];
+    this.lastAcceptedTriggerRssi = null;
   }
 
   async getRssiRaw() {
@@ -169,6 +173,7 @@ class CC1101SegmentCollector {
     this.pendingTrigger = null;
     this.edges = [];
     this.recentPresses = [];
+    this.lastAcceptedTriggerRssi = null;
 
     this.radio = new CC1101Driver({
       bus: this.options.bus,
@@ -188,7 +193,7 @@ class CC1101SegmentCollector {
     await sleep(100);
 
     this.options.onMessage(
-      `segment collector started gdo0=${this.options.gdo0} threshold=${this.options.threshold} baseUs=${this.options.baseUs} lookbackMs=${this.options.lookbackMs} settleMs=${this.options.settleMs} silenceUnits=${this.options.silenceUnits}`
+      `segment collector started gdo0=${this.options.gdo0} threshold=${this.options.threshold} baseUs=${this.options.baseUs} lookbackMs=${this.options.lookbackMs} settleMs=${this.options.settleMs} silenceUnits=${this.options.silenceUnits} rssiTolerance=${this.options.rssiTolerance ?? "off"}`
     );
 
     this.gdo0Pin.on("alert", (level, tick) => this.handleAlert(level, tick));
@@ -203,6 +208,14 @@ class CC1101SegmentCollector {
       const rssi = await this.getRssiRaw().catch(() => null);
 
       if (!this.pendingTrigger && now >= this.cooldownUntil && rssi !== null && rssi < this.options.threshold) {
+        if (!shouldAcceptTriggerRssi(this.lastAcceptedTriggerRssi, rssi, this.options.rssiTolerance)) {
+          this.options.onMessage(
+            `ignored rssi=${rssi} reference=${this.lastAcceptedTriggerRssi} tolerance=${this.options.rssiTolerance}`
+          );
+          this.cooldownUntil = now + 100;
+          await sleep(this.options.pollMs);
+          continue;
+        }
         this.pendingTrigger = {
           triggerTimeMs: now,
           triggerRssi: rssi,
@@ -229,6 +242,7 @@ class CC1101SegmentCollector {
           this.recentPresses.shift();
         }
 
+        this.lastAcceptedTriggerRssi = press.triggerRssi;
         this.options.onPress(press, [...this.recentPresses]);
         this.pendingTrigger = null;
         this.cooldownUntil = now + this.options.cooldownMs;
