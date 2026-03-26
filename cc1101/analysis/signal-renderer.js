@@ -37,7 +37,7 @@ function classifyUnit(unit) {
  * @param {number=} maxSteps
  * @returns {string}
  */
-function renderPulseTrack(units, levels = [], maxSteps = 48) {
+function renderPulseTrack(units, levels = [], maxSteps = 32) {
   const parts = [];
 
   for (let i = 0; i < Math.min(units.length, maxSteps); i += 1) {
@@ -47,9 +47,9 @@ function renderPulseTrack(units, levels = [], maxSteps = 48) {
     const width =
       rawUnit === null || rawUnit === undefined ? 1 :
       unit <= 1 ? 1 :
-      unit <= 3 ? 2 :
-      unit <= 6 ? 3 :
-      4;
+      unit <= 3 ? 1 :
+      unit <= 6 ? 2 :
+      3;
     const glyph = rawUnit === null || rawUnit === undefined ? "·" : (level ? "▀" : "▄");
     const color =
       rawUnit === null || rawUnit === undefined ? COLOR.dim :
@@ -59,9 +59,6 @@ function renderPulseTrack(units, levels = [], maxSteps = 48) {
       COLOR.red;
 
     parts.push(paint(color, glyph.repeat(width)));
-    if (i < units.length - 1) {
-      parts.push(paint(COLOR.dim, " "));
-    }
   }
 
   if (units.length > maxSteps) {
@@ -76,12 +73,12 @@ function renderPulseTrack(units, levels = [], maxSteps = 48) {
  * @param {number=} maxItems
  * @returns {string}
  */
-function renderUnitClasses(units, maxItems = 48) {
+function renderUnitClasses(units, maxItems = 32) {
   const values = units.slice(0, maxItems).map((unit) => classifyUnit(unit));
   if (units.length > maxItems) {
     values.push(paint(COLOR.dim, "…"));
   }
-  return values.join(" ");
+  return values.join("");
 }
 
 /**
@@ -89,7 +86,7 @@ function renderUnitClasses(units, maxItems = 48) {
  * @param {number=} maxItems
  * @returns {string}
  */
-function renderNumberRow(values, maxItems = 24) {
+function renderNumberRow(values, maxItems = 12) {
   const visible = values.slice(0, maxItems).map((value) => String(value ?? "?").padStart(3, " "));
   if (values.length > maxItems) {
     visible.push("...");
@@ -115,7 +112,7 @@ function renderSignalSummary(options) {
     durationsUs = [],
     snappedUs = [],
     label = "signal",
-    maxSteps = 48,
+    maxSteps = 32,
   } = options;
 
   const lines = [
@@ -125,12 +122,12 @@ function renderSignalSummary(options) {
   ];
 
   if (snappedUs.length) {
-    lines.push(`snap:  ${renderNumberRow(snappedUs, 18)}`);
+    lines.push(`snap:  ${renderNumberRow(snappedUs, 12)}`);
   } else if (durationsUs.length) {
-    lines.push(`dt:    ${renderNumberRow(durationsUs, 18)}`);
+    lines.push(`dt:    ${renderNumberRow(durationsUs, 12)}`);
   }
 
-  lines.push(`unit:  ${renderNumberRow(units, 18)}`);
+  lines.push(`unit:  ${renderNumberRow(units, 12)}`);
   return lines;
 }
 

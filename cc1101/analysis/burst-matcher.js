@@ -4,11 +4,11 @@ const { Gpio } = require("pigpio");
 const { CC1101Driver } = require("../driver");
 const { BAND, MODULATION, RADIO_MODE } = require("../profiles");
 const { sleep } = require("../utils");
+const { renderSignalSummary } = require("./signal-renderer");
 const {
   bestWindowAlignment,
   compactTokenString,
   normalizeBurst,
-  renderTokenBars,
   repeatedCore,
   splitIntoSubframes,
   tokenString,
@@ -72,7 +72,13 @@ class CC1101BurstMatcher {
         this.options.onMessage(`baseUnit:   ~${result.baseUnitUs} us`);
         this.options.onMessage(`tokens:     ${tokenString(result.tokens)}`);
         this.options.onMessage(`compact:    ${compactTokenString(result.tokens)}`);
-        this.options.onMessage(`bars:       ${renderTokenBars(result.tokens)}`);
+        for (const line of renderSignalSummary({
+          label: "burst",
+          units: result.tokens.map((token) => token.units),
+          levels: result.tokens.map((token) => token.level),
+        })) {
+          this.options.onMessage(line);
+        }
         this.options.onMessage("");
 
         result.subframes.forEach((subframe, index) => {
@@ -87,6 +93,13 @@ class CC1101BurstMatcher {
           this.options.onMessage(`score:      ${result.core.score}/${result.core.overlap}`);
           this.options.onMessage(`core:       ${tokenString(result.core.matched)}`);
           this.options.onMessage(`compact:    ${compactTokenString(result.core.matched)}`);
+          for (const line of renderSignalSummary({
+            label: "core",
+            units: result.core.matched.map((token) => token.units),
+            levels: result.core.matched.map((token) => token.level),
+          })) {
+            this.options.onMessage(line);
+          }
           this.options.onMessage("");
         }
 
@@ -98,6 +111,13 @@ class CC1101BurstMatcher {
           this.options.onMessage(`score:      ${result.bestPrevious.score}/${result.bestPrevious.overlap}`);
           this.options.onMessage(`shared:     ${tokenString(result.bestPrevious.matched)}`);
           this.options.onMessage(`compact:    ${compactTokenString(result.bestPrevious.matched)}`);
+          for (const line of renderSignalSummary({
+            label: "shared",
+            units: result.bestPrevious.matched.map((token) => token.units),
+            levels: result.bestPrevious.matched.map((token) => token.level),
+          })) {
+            this.options.onMessage(line);
+          }
           this.options.onMessage("");
         }
       }),

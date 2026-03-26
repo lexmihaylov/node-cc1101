@@ -4,13 +4,13 @@ const { Gpio } = require("pigpio");
 const { CC1101Driver } = require("../driver");
 const { BAND, MODULATION, RADIO_MODE } = require("../profiles");
 const { sleep } = require("../utils");
+const { renderSignalSummary } = require("./signal-renderer");
 const {
   bestWindowAlignment,
   buildCanonicalFrame,
   compactTokenString,
   extractSharedWindow,
   normalizeBurst,
-  renderTokenBars,
   splitIntoSubframes,
   tokenString,
   trimNoise,
@@ -78,7 +78,13 @@ class CC1101CanonicalFrameBuilder {
         this.options.onMessage(`baseUnit:   ~${result.baseUnitUs} us`);
         this.options.onMessage(`tokens:     ${tokenString(result.tokens)}`);
         this.options.onMessage(`compact:    ${compactTokenString(result.tokens)}`);
-        this.options.onMessage(`bars:       ${renderTokenBars(result.tokens)}`);
+        for (const line of renderSignalSummary({
+          label: "burst",
+          units: result.tokens.map((token) => token.units),
+          levels: result.tokens.map((token) => token.level),
+        })) {
+          this.options.onMessage(line);
+        }
         this.options.onMessage("");
 
         result.subframes.forEach((subframe, index) => {
@@ -95,6 +101,13 @@ class CC1101CanonicalFrameBuilder {
           this.options.onMessage(`score:      ${result.bestPrevious.score}/${result.bestPrevious.overlap}`);
           this.options.onMessage(`shared:     ${tokenString(result.bestPrevious.shared)}`);
           this.options.onMessage(`compact:    ${compactTokenString(result.bestPrevious.shared)}`);
+          for (const line of renderSignalSummary({
+            label: "shared",
+            units: result.bestPrevious.shared.map((token) => token.units),
+            levels: result.bestPrevious.shared.map((token) => token.level),
+          })) {
+            this.options.onMessage(line);
+          }
           this.options.onMessage("");
         }
 
@@ -103,7 +116,13 @@ class CC1101CanonicalFrameBuilder {
           this.options.onMessage(`sources:    ${result.canonicalSourceIds.join(", ")}`);
           this.options.onMessage(`tokens:     ${tokenString(result.canonical)}`);
           this.options.onMessage(`compact:    ${compactTokenString(result.canonical)}`);
-          this.options.onMessage(`bars:       ${renderTokenBars(result.canonical)}`);
+          for (const line of renderSignalSummary({
+            label: "canon",
+            units: result.canonical.map((token) => token.units),
+            levels: result.canonical.map((token) => token.level),
+          })) {
+            this.options.onMessage(line);
+          }
           this.options.onMessage("");
         }
       }),
