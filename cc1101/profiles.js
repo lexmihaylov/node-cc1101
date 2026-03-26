@@ -223,30 +223,33 @@ function getDirectAsyncPreset({
   agcCtrl2 = VALUE.AGCCTRL2.MAX_DVGA_GAIN,
 } = {}) {
   const common = getCommonPreset({ band });
-
-  if (modulation !== MODULATION.OOK) {
-    throw new Error(`Direct async mode is only supported for ${MODULATION.OOK}`);
-  }
+  const modulationPreset = modulation === MODULATION.FSK
+    ? {
+        [REG.MDMCFG4]: 0xca,
+        [REG.MDMCFG3]: 0x83,
+        [REG.MDMCFG2]: VALUE.MDMCFG2.FSK_PACKET,
+        [REG.MDMCFG1]: 0x22,
+        [REG.MDMCFG0]: 0xf8,
+        [REG.DEVIATN]: 0x15,
+      }
+    : {
+        [REG.MDMCFG4]: 0xf5,
+        [REG.MDMCFG3]: 0x43,
+        [REG.MDMCFG2]: VALUE.MDMCFG2.OOK_NO_SYNC,
+        [REG.MDMCFG1]: 0x22,
+        [REG.MDMCFG0]: 0xf8,
+        [REG.DEVIATN]: 0x00,
+      };
 
   return {
     ...common,
-    [REG.MDMCFG4]: 0xf5,   // wider bandwidth
-    [REG.MDMCFG3]: 0x43,
-    [REG.MDMCFG2]: VALUE.MDMCFG2.OOK_NO_SYNC,   // NO strict sync (important)
-    [REG.MDMCFG1]: 0x22,
-    [REG.MDMCFG0]: 0xf8,
-    [REG.DEVIATN]: 0x00,
-
+    ...modulationPreset,
     [REG.PKTCTRL1]: packetControl1,
-    [REG.PKTCTRL0]: VALUE.PKTCTRL0.VARIABLE_LENGTH_WITH_CRC,
     [REG.PKTLEN]: 0x3d,
-
     [REG.IOCFG0]: gdo0,
     [REG.IOCFG1]: gdo1,
     [REG.IOCFG2]: gdo2,
     [REG.PKTCTRL0]: VALUE.PKTCTRL0.ASYNC_SERIAL_MODE,
-    [REG.MDMCFG2]: VALUE.MDMCFG2.OOK_NO_SYNC,
-
     [REG.AGCCTRL2]: agcCtrl2,
   };
 }
@@ -325,10 +328,6 @@ function validateRadioConfig(options = {}) {
   assertEnumValue("band", band, Object.values(BAND));
   assertEnumValue("modulation", modulation, Object.values(MODULATION));
   assertEnumValue("mode", mode, Object.values(RADIO_MODE));
-
-  if (mode === RADIO_MODE.DIRECT_ASYNC && modulation !== MODULATION.OOK) {
-    throw new Error(`mode=${RADIO_MODE.DIRECT_ASYNC} only supports modulation=${MODULATION.OOK}`);
-  }
 
   if (gpio === null || typeof gpio !== "object" || Array.isArray(gpio)) {
     throw new Error("gpio must be an object");

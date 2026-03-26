@@ -193,8 +193,10 @@ class RadioShell {
     console.log("  listen start [pollMs]");
     console.log("  listen stop");
     console.log("  live view [gdo0] [gdo2] [threshold] [windowMs]");
+    console.log("  live view-fsk [gdo0] [gdo2] [threshold] [windowMs]");
     console.log("  raw listen [gpio] [threshold] [captureMs] [rssiTolerance]");
     console.log("  signal detect [gdo0] [threshold] [lookbackMs] [settleMs] [rssiTolerance]");
+    console.log("  signal detect-fsk [gdo0] [threshold] [lookbackMs] [settleMs] [rssiTolerance]");
     console.log("  timing fixed [gdo0] [threshold] [baseUs] [lookbackMs] [rssiTolerance]");
     console.log("  segment collect [gdo0] [threshold] [baseUs] [lookbackMs] [rssiTolerance]");
     console.log("  burst match [gpio] [silenceGapUs] [minEdges] [baseUnitUs]");
@@ -224,8 +226,10 @@ class RadioShell {
     console.log("  config set direct_async 433 ook");
     console.log("  gpio set async_serial_data high_impedance high_impedance");
     console.log("  live view 24 25 100 3000");
+    console.log("  live view-fsk 24 25 100 3000");
     console.log("  raw listen 24 100 220 6");
     console.log("  signal detect 24 100 1000 220 6");
+    console.log("  signal detect-fsk 24 100 1000 220 6");
     console.log("  timing fixed 24 100 500 1000 6");
     console.log("  segment collect 24 100 400 500 6");
     console.log("  burst match 24 10000 16 0");
@@ -436,7 +440,7 @@ class RadioShell {
     await this.protocolRuntime.start();
   }
 
-  async startLiveView(gdo0 = 24, gdo2 = 25, threshold = 100, windowMs = 3000) {
+  async startLiveView(gdo0 = 24, gdo2 = 25, threshold = 100, windowMs = 3000, modulation = MODULATION.OOK) {
     await this.stopListening();
     await this.stopProtocolRuntime();
     await this.disconnect();
@@ -449,6 +453,7 @@ class RadioShell {
       gdo2: Number(gdo2),
       threshold: Number(threshold),
       windowMs: Number(windowMs),
+      modulation: parseModulation(modulation, MODULATION.OOK),
       onMessage: (message) => {
         console.log(`[live] ${message}`);
       },
@@ -457,7 +462,7 @@ class RadioShell {
     await this.protocolRuntime.start();
   }
 
-  async startSignalDetect(gdo0 = 24, threshold = 100, lookbackMs = 1000, settleMs = 220, rssiTolerance) {
+  async startSignalDetect(gdo0 = 24, threshold = 100, lookbackMs = 1000, settleMs = 220, rssiTolerance, modulation = MODULATION.OOK) {
     await this.stopListening();
     await this.stopProtocolRuntime();
     await this.disconnect();
@@ -470,6 +475,7 @@ class RadioShell {
       threshold: Number(threshold),
       lookbackMs: Number(lookbackMs),
       settleMs: Number(settleMs),
+      modulation: parseModulation(modulation, MODULATION.OOK),
       rssiTolerance: rssiTolerance !== undefined ? Number(rssiTolerance) : null,
       onMessage: (message) => {
         console.log(`[signal] ${message}`);
@@ -834,7 +840,16 @@ async function executeCommand(shell, line, onExit) {
       Number(rest[0] ?? 24),
       Number(rest[1] ?? 25),
       Number(rest[2] ?? 100),
-      Number(rest[3] ?? 3000)
+      Number(rest[3] ?? 3000),
+      MODULATION.OOK
+    );
+  } else if (command === "live" && subcommand === "view-fsk") {
+    await shell.startLiveView(
+      Number(rest[0] ?? 24),
+      Number(rest[1] ?? 25),
+      Number(rest[2] ?? 100),
+      Number(rest[3] ?? 3000),
+      MODULATION.FSK
     );
   } else if (command === "raw" && subcommand === "listen") {
     await shell.startRawListen(
@@ -849,7 +864,17 @@ async function executeCommand(shell, line, onExit) {
       Number(rest[1] ?? 100),
       Number(rest[2] ?? 1000),
       Number(rest[3] ?? 220),
-      rest[4] !== undefined ? Number(rest[4]) : undefined
+      rest[4] !== undefined ? Number(rest[4]) : undefined,
+      MODULATION.OOK
+    );
+  } else if (command === "signal" && subcommand === "detect-fsk") {
+    await shell.startSignalDetect(
+      Number(rest[0] ?? 24),
+      Number(rest[1] ?? 100),
+      Number(rest[2] ?? 1000),
+      Number(rest[3] ?? 220),
+      rest[4] !== undefined ? Number(rest[4]) : undefined,
+      MODULATION.FSK
     );
   } else if (command === "timing" && subcommand === "fixed") {
     await shell.startFixedTiming(

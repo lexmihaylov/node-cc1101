@@ -32,6 +32,7 @@ const CLEAR_LINE = "\x1b[2K";
  * @property {number=} minDtUs
  * @property {number=} width
  * @property {number=} rows
+ * @property {"ook" | "fsk"=} modulation
  * @property {number=} minRssi
  * @property {number=} maxRssi
  * @property {(message: string) => void=} onMessage
@@ -226,6 +227,7 @@ class CC1101LiveVisualizer {
       minDtUs: options.minDtUs ?? 20,
       width: options.width ?? 100,
       rows: options.rows ?? 6,
+      modulation: options.modulation ?? MODULATION.OOK,
       minRssi: options.minRssi ?? 0,
       maxRssi: options.maxRssi ?? 255,
       onMessage: options.onMessage ?? ((message) => console.log(message)),
@@ -284,6 +286,7 @@ class CC1101LiveVisualizer {
     const rowWindowMs = Math.max(100, Math.round(this.options.windowMs / rowCount));
 
     lines.push(`GDO live waveform view  |  window=${this.options.windowMs}ms  threshold=${this.options.threshold}  gdo0=${this.options.gdo0}  gdo2=${this.options.gdo2}`);
+    lines.push(color(`modulation=${this.options.modulation}`, "90"));
     lines.push(color("red = trigger window, cyan = RSSI, green/yellow = active, gray = idle", "90"));
     lines.push(color(`rows show recent ${rowWindowMs}ms slices from oldest to newest`, "90"));
     lines.push("");
@@ -468,7 +471,7 @@ class CC1101LiveVisualizer {
     await this.radio.verifyChip();
     await this.radio.startDirectAsyncRx({
       band: BAND.MHZ_433,
-      modulation: MODULATION.OOK,
+      modulation: this.options.modulation,
       mode: RADIO_MODE.DIRECT_ASYNC,
       gpio: {
         gdo2: VALUE.IOCFG.PQI,

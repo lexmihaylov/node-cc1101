@@ -44,6 +44,7 @@ const {
  * @property {number=} minDtUs
  * @property {number=} minFrameEdges
  * @property {number=} silenceUnits
+ * @property {"ook" | "fsk"=} modulation
  * @property {number | null=} rssiTolerance
  * @property {(message: string) => void=} onMessage
  * @property {(result: SignalDetectionResult) => void=} onDetection
@@ -68,6 +69,7 @@ class CC1101SignalDetector {
       minDtUs: options.minDtUs ?? 20,
       minFrameEdges: options.minFrameEdges ?? 8,
       silenceUnits: options.silenceUnits ?? 12,
+      modulation: options.modulation ?? MODULATION.OOK,
       rssiTolerance: options.rssiTolerance ?? null,
       onMessage: options.onMessage ?? ((message) => console.log(message)),
       onDetection: options.onDetection ?? ((result) => {
@@ -170,13 +172,13 @@ class CC1101SignalDetector {
     await this.radio.verifyChip();
     await this.radio.startDirectAsyncRx({
       band: BAND.MHZ_433,
-      modulation: MODULATION.OOK,
+      modulation: this.options.modulation,
       mode: RADIO_MODE.DIRECT_ASYNC,
     });
     await sleep(100);
 
     this.options.onMessage(
-      `signal detector started gdo0=${this.options.gdo0} threshold=${this.options.threshold} lookbackMs=${this.options.lookbackMs} settleMs=${this.options.settleMs} rssiTolerance=${this.options.rssiTolerance ?? "off"}`
+      `signal detector started gdo0=${this.options.gdo0} modulation=${this.options.modulation} threshold=${this.options.threshold} lookbackMs=${this.options.lookbackMs} settleMs=${this.options.settleMs} rssiTolerance=${this.options.rssiTolerance ?? "off"}`
     );
 
     this.gdo0Pin.on("alert", (level, tick) => this.handleAlert(level, tick));
