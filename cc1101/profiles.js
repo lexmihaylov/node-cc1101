@@ -223,27 +223,19 @@ function getDirectAsyncPreset({
   agcCtrl2 = VALUE.AGCCTRL2.MAX_DVGA_GAIN,
 } = {}) {
   const common = getCommonPreset({ band });
-  const modulationPreset = modulation === MODULATION.FSK
-    ? {
-        [REG.MDMCFG4]: 0xca,
-        [REG.MDMCFG3]: 0x83,
-        [REG.MDMCFG2]: VALUE.MDMCFG2.FSK_PACKET,
-        [REG.MDMCFG1]: 0x22,
-        [REG.MDMCFG0]: 0xf8,
-        [REG.DEVIATN]: 0x15,
-      }
-    : {
-        [REG.MDMCFG4]: 0xf5,
-        [REG.MDMCFG3]: 0x43,
-        [REG.MDMCFG2]: VALUE.MDMCFG2.OOK_NO_SYNC,
-        [REG.MDMCFG1]: 0x22,
-        [REG.MDMCFG0]: 0xf8,
-        [REG.DEVIATN]: 0x00,
-      };
+
+  if (modulation !== MODULATION.OOK) {
+    throw new Error(`Direct async mode is only supported for ${MODULATION.OOK}`);
+  }
 
   return {
     ...common,
-    ...modulationPreset,
+    [REG.MDMCFG4]: 0xf5,
+    [REG.MDMCFG3]: 0x43,
+    [REG.MDMCFG2]: VALUE.MDMCFG2.OOK_NO_SYNC,
+    [REG.MDMCFG1]: 0x22,
+    [REG.MDMCFG0]: 0xf8,
+    [REG.DEVIATN]: 0x00,
     [REG.PKTCTRL1]: packetControl1,
     [REG.PKTLEN]: 0x3d,
     [REG.IOCFG0]: gdo0,
@@ -328,6 +320,10 @@ function validateRadioConfig(options = {}) {
   assertEnumValue("band", band, Object.values(BAND));
   assertEnumValue("modulation", modulation, Object.values(MODULATION));
   assertEnumValue("mode", mode, Object.values(RADIO_MODE));
+
+  if (mode === RADIO_MODE.DIRECT_ASYNC && modulation !== MODULATION.OOK) {
+    throw new Error(`mode=${RADIO_MODE.DIRECT_ASYNC} only supports modulation=${MODULATION.OOK}`);
+  }
 
   if (gpio === null || typeof gpio !== "object" || Array.isArray(gpio)) {
     throw new Error("gpio must be an object");
