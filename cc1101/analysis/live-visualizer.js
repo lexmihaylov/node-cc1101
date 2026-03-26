@@ -31,6 +31,7 @@ const CLEAR_LINE = "\x1b[2K";
  * @property {number=} triggerHoldMs
  * @property {number=} minDtUs
  * @property {number=} width
+ * @property {number=} rows
  * @property {number=} minRssi
  * @property {number=} maxRssi
  * @property {(message: string) => void=} onMessage
@@ -158,6 +159,54 @@ function buildTriggerLine(options) {
   return line;
 }
 
+/**
+ * @param {{
+ *   label: string,
+ *   history: TimedSample[],
+ *   defaultValue: number,
+ *   width: number,
+ *   startMs: number,
+ *   endMs: number,
+ *   triggerWindows: TriggerWindow[],
+ *   onChar: string,
+ *   offChar: string,
+ *   onColor?: string,
+ *   offColor?: string,
+ *   triggerColor?: string,
+ * }} options
+ * @returns {string}
+ */
+function buildWindowLine(options) {
+  let line = options.label.padEnd(8, " ");
+  const spanMs = Math.max(1, options.endMs - options.startMs);
+
+  for (let x = 0; x < options.width; x += 1) {
+    const t = options.startMs + Math.round((x / Math.max(1, options.width - 1)) * spanMs);
+    const state = getStateAt(options.history, options.defaultValue, t);
+    const inTrigger = options.triggerWindows.some((window) => t >= window.start && t <= window.end);
+    const char = state ? options.onChar : options.offChar;
+
+    if (inTrigger) {
+      line += color(char, options.triggerColor ?? "31");
+    } else {
+      line += color(char, state ? (options.onColor ?? "37") : (options.offColor ?? "90"));
+    }
+  }
+
+  return line;
+}
+
+/**
+ * @param {number} now
+ * @param {number} endMs
+ * @returns {string}
+ */
+function formatAgo(now, endMs) {
+  const delta = Math.max(0, now - endMs);
+  if (delta < 1000) return `${delta}ms`;
+  return `${(delta / 1000).toFixed(1)}s`;
+}
+
 class CC1101LiveVisualizer {
   /**
    * @param {LiveVisualizerOptions=} options
@@ -176,6 +225,7 @@ class CC1101LiveVisualizer {
       triggerHoldMs: options.triggerHoldMs ?? 250,
       minDtUs: options.minDtUs ?? 20,
       width: options.width ?? 100,
+      rows: options.rows ?? 6,
       minRssi: options.minRssi ?? 0,
       maxRssi: options.maxRssi ?? 255,
       onMessage: options.onMessage ?? ((message) => console.log(message)),
@@ -230,8 +280,12 @@ class CC1101LiveVisualizer {
 
   buildScreen(now) {
     const lines = [];
+    const rowCount = Math.max(2, this.options.rows);
+    const rowWindowMs = Math.max(100, Math.round(this.options.windowMs / rowCount));
+
     lines.push(`GDO live waveform view  |  window=${this.options.windowMs}ms  threshold=${this.options.threshold}  gdo0=${this.options.gdo0}  gdo2=${this.options.gdo2}`);
     lines.push(color("red = trigger window, cyan = RSSI, green/yellow = active, gray = idle", "90"));
+    lines.push(color(`rows show recent ${rowWindowMs}ms slices from oldest to newest`, "90"));
     lines.push("");
     lines.push(buildLine({
       label: "GDO0 H/L",
@@ -280,10 +334,54 @@ class CC1101LiveVisualizer {
     }));
     lines.push("");
 
+    lines.push(color("Recent GDO0 slices", "35"));
+    for (let row = 0; row < rowCount; row += 1) {
+      const startMs = now - this.options.windowMs + (row * rowWindowMs);
+      const endMs = row === rowCount - 1 ? now : startMs + rowWindowMs;
+      const ageLabel = formatAgo(now, endMs).padStart(6, " ");
+      lines.push(buildWindowLine({
+        label: ageLabel,
+        history: this.gdo0History,
+        defaultValue: 0,
+        width: this.options.width,
+        startMs,
+        endMs,
+        triggerWindows: this.triggerWindows,
+        onChar: "▀",
+        offChar: "·",
+        onColor: "32",
+        offColor: "90",
+        triggerColor: "31",
+      }));
+    }
+    lines.push("");
+
+    lines.push(color("Recent GDO2 slices", "35"));
+    for (let row = 0; row < rowCount; row += 1) {
+      const startMs = now - this.options.windowMs + (row * rowWindowMs);
+      const endMs = row === rowCount - 1 ? now : startMs + rowWindowMs;
+      const ageLabel = formatAgo(now, endMs).padStart(6, " ");
+      lines.push(buildWindowLine({
+        label: ageLabel,
+        history: this.gdo2History,
+        defaultValue: 0,
+        width: this.options.width,
+        startMs,
+        endMs,
+        triggerWindows: this.triggerWindows,
+        onChar: "▀",
+        offChar: "·",
+        onColor: "33",
+        offColor: "90",
+        triggerColor: "31",
+      }));
+    }
+    lines.push("");
+
     const lastRssi = this.rssiHistory.length ? this.rssiHistory[this.rssiHistory.length - 1].v : "n/a";
     const activeTriggers = this.triggerWindows.filter((window) => now >= window.start && now <= window.end).length;
     lines.push(`Current RSSI: ${lastRssi}   GDO0: ${this.gdo0State}   GDO2: ${this.gdo2State}   Active trigger windows: ${activeTriggers}`);
-    lines.push("Use this to visually inspect where the waveform becomes structured around red trigger regions.");
+    lines.push("Newest slice is at the bottom. Repeated presses should produce similar row shapes.");
 
     return lines;
   }
