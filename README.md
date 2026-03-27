@@ -153,7 +153,7 @@ cc1101> send aa 55 01
 cc1101> mode direct_async 433 ook
 cc1101> record /tmp/rf-captures/session-001.json 24
 cc1101> stop
-cc1101> show /tmp/rf-captures/session-001.json 10000 8
+cc1101> show /tmp/rf-captures/session-001.json 10000
 cc1101> replay /tmp/rf-captures/session-001.json 0 10000 24 10
 ```
 
@@ -164,12 +164,12 @@ cc1101> replay /tmp/rf-captures/session-001.json 0 10000 24 10
 - `man [command]`
 - `status`
 - `mode [packet|direct_async] [band] [modulation]`
-- `listen [pollMs|gpio] [silenceGapUs] [minEdges]`
+- `listen [pollMs|gpio] [silenceGapUs]`
 - `send <hex-bytes...>`
 - `send <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats]`
 - `record <file> [rxDataGpio]`
 - `replay <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats]`
-- `show <file> [silenceGapUs] [minEdges]`
+- `show <file> [silenceGapUs]`
 - `stop`
 - `idle`
 
@@ -192,6 +192,7 @@ During direct-async `listen` and `show`, raw signals are also rendered with:
 This is display-only scaling. Stored timings remain raw microseconds.
 
 For saved raw streams, `show` uses the supplied `silenceGapUs` to split the recording into frames. `replay` uses the same silence rule and frame index, then replays that frame rebased to time zero so the leading silence before the frame is not transmitted.
+Single-edge signals and single-edge frames are kept.
 
 In direct-async `listen`, the shell uses a simple state machine:
 

@@ -22,7 +22,6 @@ const { renderRawSignal } = require("./capture-file");
  * @property {number=} speedHz
  * @property {number=} gpio
  * @property {number=} silenceGapUs
- * @property {number=} minEdges
  * @property {number=} pollMs
  * @property {(message: string) => void=} onMessage
  * @property {(frame: RawFrame) => void=} onFrame
@@ -40,7 +39,6 @@ class CC1101RawListener {
       speedHz: options.speedHz ?? 100000,
       gpio: options.gpio ?? 24,
       silenceGapUs: options.silenceGapUs ?? 10000,
-      minEdges: options.minEdges ?? 8,
       pollMs: options.pollMs ?? 5,
       onMessage: options.onMessage ?? ((message) => console.log(message)),
       onFrame: options.onFrame ?? ((frame) => {
@@ -85,7 +83,7 @@ class CC1101RawListener {
   }
 
   emitFrame(reason) {
-    if (this.frameBuffer.length < this.options.minEdges) {
+    if (this.frameBuffer.length === 0) {
       this.resetFrameBuffer();
       return;
     }
@@ -163,7 +161,7 @@ class CC1101RawListener {
     await sleep(100);
 
     this.options.onMessage(
-      `raw edge listen gpio=${this.options.gpio} silenceGapUs=${this.options.silenceGapUs} minEdges=${this.options.minEdges}`
+      `raw edge listen gpio=${this.options.gpio} silenceGapUs=${this.options.silenceGapUs}`
     );
     this.options.onStateChange(this.state);
 

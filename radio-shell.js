@@ -144,14 +144,14 @@ const MANUALS = {
     "",
     "USAGE",
     "  listen [pollMs]",
-    "  listen [gpio] [silenceGapUs] [minEdges]",
+    "  listen [gpio] [silenceGapUs]",
     "",
     "MODE BEHAVIOR",
     "  packet mode",
     "    listen [pollMs]",
     "    Starts FIFO packet receive polling.",
     "  direct_async mode",
-    "    listen [gpio] [silenceGapUs] [minEdges]",
+    "    listen [gpio] [silenceGapUs]",
     "    Starts a raw OOK edge listener with two states:",
     "    silence -> signal_detected -> silence.",
     "    The edges collected between those state transitions are emitted as one raw signal window.",
@@ -165,11 +165,9 @@ const MANUALS = {
     "    Direct-async mode only. If no new edge arrives for at least this many microseconds,",
     "    the current signal is considered finished and the listener returns to silence.",
     "    Default 10000 us.",
-    "  minEdges",
-    "    Direct-async mode only. Ignore very short signals with fewer than this many edges.",
-    "    Default 8.",
     "",
     "DESCRIPTION",
+    "  Every silence-delimited signal is emitted, including single-edge signals.",
     "  Stops any existing runtime before starting a new listener.",
     "  Stop it with `stop`, `idle`, `disconnect`, or Ctrl+C.",
   ].join("\n"),
@@ -253,21 +251,20 @@ const MANUALS = {
     "  show - summarize a saved JSON file",
     "",
     "USAGE",
-    "  show <file> [silenceGapUs] [minEdges]",
+    "  show <file> [silenceGapUs]",
     "",
     "OPTIONS",
     "  file",
     "    Any saved stream/frame/capture JSON file.",
     "  silenceGapUs",
     "    For raw stream files, split frames using this silence threshold. Default 10000 us.",
-    "  minEdges",
-    "    Ignore segmented frames shorter than this many edges. Default 8.",
     "",
     "DESCRIPTION",
     "  Prints a short summary including timestamp, edge count, and top-level fields.",
     "  For raw edge files, it also segments the stream into silence-delimited frames and renders",
     "  each frame with a compact shape row and a scaled high/low timeline so similar captures",
     "  can be compared visually without changing the stored timings.",
+    "  Every identified frame is shown, including single-edge frames.",
   ].join("\n"),
   stop: [
     "NAME",
@@ -437,12 +434,12 @@ class RadioShell {
     console.log("  disconnect");
     console.log("  status");
     console.log("  mode [packet|direct_async] [band] [modulation]");
-    console.log("  listen [pollMs|gpio] [silenceGapUs] [minEdges]");
+    console.log("  listen [pollMs|gpio] [silenceGapUs]");
     console.log("  send <hex-bytes...>");
     console.log("  send <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats]");
     console.log("  record <file> [rxDataGpio]");
     console.log("  replay <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats]");
-    console.log("  show <file> [silenceGapUs] [minEdges]");
+    console.log("  show <file> [silenceGapUs]");
     console.log("  stop");
     console.log("  idle");
     console.log("  clear");
@@ -454,10 +451,10 @@ class RadioShell {
     console.log("  listen 20");
     console.log("  send aa 55 01");
     console.log("  mode direct_async 433 ook");
-    console.log("  listen 24 10000 8");
+    console.log("  listen 24 10000");
     console.log("  record /tmp/rf-captures/session-001.json 24");
     console.log("  stop");
-    console.log("  show /tmp/rf-captures/session-001.json 10000 8");
+    console.log("  show /tmp/rf-captures/session-001.json 10000");
     console.log("  replay /tmp/rf-captures/session-001.json 0 10000 24 10");
   }
 
@@ -550,7 +547,7 @@ class RadioShell {
     }
   }
 
-  async startDirectAsyncListen(gpio = 24, silenceGapUs = 10000, minEdges = 8) {
+  async startDirectAsyncListen(gpio = 24, silenceGapUs = 10000) {
     await this.stop();
     await this.disconnect();
 
@@ -560,7 +557,6 @@ class RadioShell {
       speedHz: this.speedHz,
       gpio: Number(gpio),
       silenceGapUs: Number(silenceGapUs),
-      minEdges: Number(minEdges),
       onMessage: (message) => {
         console.log(`[async] ${message}`);
       },
@@ -577,8 +573,7 @@ class RadioShell {
 
     await this.startDirectAsyncListen(
       Number(arg0 ?? 24),
-      Number(arg1 ?? 10000),
-      Number(arg2 ?? 8)
+      Number(arg1 ?? 10000)
     );
   }
 
@@ -669,7 +664,7 @@ class RadioShell {
     await this.runtime.start();
   }
 
-  show(file, silenceGapUs = 10000, minEdges = 8) {
+  show(file, silenceGapUs = 10000) {
     if (!file) {
       throw new Error("show requires a capture file path");
     }
@@ -682,7 +677,6 @@ class RadioShell {
 
     const segmented = renderSegmentedFrames(capture, {
       silenceGapUs: Number(silenceGapUs),
-      minEdges: Number(minEdges),
     });
     if (segmented) {
       console.log("");
@@ -756,7 +750,7 @@ async function executeCommand(shell, line, onExit) {
   } else if (command === "replay") {
     await shell.replay(subcommand, rest[0], rest[1], rest[2], rest[3]);
   } else if (command === "show") {
-    shell.show(subcommand, rest[0], rest[1]);
+    shell.show(subcommand, rest[0]);
   } else if (command === "stop") {
     await shell.stop();
     console.log("stopped");

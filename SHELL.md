@@ -62,12 +62,12 @@ Defaults:
 - `disconnect`
 - `status`
 - `mode [packet|direct_async] [band] [modulation]`
-- `listen [pollMs|gpio] [silenceGapUs] [minEdges]`
+- `listen [pollMs|gpio] [silenceGapUs]`
 - `send <hex-bytes...>`
 - `send <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats]`
 - `record <file> [rxDataGpio]`
 - `replay <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats]`
-- `show <file> [silenceGapUs] [minEdges]`
+- `show <file> [silenceGapUs]`
 - `stop`
 - `idle`
 - `clear`
@@ -100,7 +100,7 @@ cc1101> mode packet 433 ook
 cc1101> mode direct_async 433 ook
 ```
 
-### `listen [pollMs|gpio] [silenceGapUs] [minEdges]`
+### `listen [pollMs|gpio] [silenceGapUs]`
 
 Mode-sensitive listen command:
 
@@ -114,7 +114,7 @@ cc1101> mode packet 433 ook
 cc1101> listen 20
 
 cc1101> mode direct_async 433 ook
-cc1101> listen 24 10000 8
+cc1101> listen 24 10000
 ```
 
 In direct-async mode the listener has two states:
@@ -122,7 +122,7 @@ In direct-async mode the listener has two states:
 - `silence`
 - `signal_detected`
 
-It starts in `silence`. The first edge changes the state to `signal_detected`. If no new edge arrives for at least `silenceGapUs`, the listener returns to `silence`. The edges collected between those two transitions are treated as one raw signal window and printed.
+It starts in `silence`. The first edge changes the state to `signal_detected`. If no new edge arrives for at least `silenceGapUs`, the listener returns to `silence`. The edges collected between those two transitions are treated as one raw signal window and printed. Even a single edge is emitted as a signal window.
 
 Each printed raw signal includes:
 
@@ -193,7 +193,7 @@ Example:
 cc1101> replay /tmp/rf-captures/session-001.json 0 10000 24 10
 ```
 
-### `show <file> [silenceGapUs] [minEdges]`
+### `show <file> [silenceGapUs]`
 
 Prints a short summary of a saved JSON file.
 
@@ -207,7 +207,6 @@ For raw edge files, `show` also renders:
 Arguments:
 
 - `silenceGapUs`: silence threshold used to split the saved stream into frames, default `10000`
-- `minEdges`: ignore segmented frames shorter than this many edges, default `8`
 
 ### `stop`
 
@@ -223,7 +222,7 @@ Stops active work and sends the radio to IDLE.
 cc1101> mode direct_async 433 ook
 cc1101> record /tmp/rf-captures/session-001.json 24
 cc1101> stop
-cc1101> show /tmp/rf-captures/session-001.json 10000 8
+cc1101> show /tmp/rf-captures/session-001.json 10000
 cc1101> replay /tmp/rf-captures/session-001.json 0 10000 24 10
 ```
 

@@ -91,20 +91,53 @@ function segmentRawFrames(capture, silenceGapUs, minEdges = 1) {
   /** @type {{ startEdgeIndex: number, levels: number[], durationsUs: number[] } | null} */
   let current = null;
 
+  /**
+   * Drop any leading separator-sized gap and force the frame to start at 0us.
+   * This keeps frame payloads independent of the silence that preceded them.
+   *
+   * @param {{ startEdgeIndex: number, levels: number[], durationsUs: number[] } | null} frame
+   * @returns {{ startEdgeIndex: number, levels: number[], durationsUs: number[] } | null}
+   */
+  const normalizeFrameStart = (frame) => {
+    if (!frame || !frame.levels.length || frame.levels.length !== frame.durationsUs.length) {
+      return null;
+    }
+
+    let offset = 0;
+    while (offset < frame.durationsUs.length && frame.durationsUs[offset] >= silenceGapUs) {
+      offset += 1;
+    }
+
+    if (offset >= frame.levels.length) {
+      return null;
+    }
+
+    const levels = frame.levels.slice(offset);
+    const durationsUs = frame.durationsUs.slice(offset);
+    durationsUs[0] = 0;
+
+    return {
+      startEdgeIndex: frame.startEdgeIndex + offset,
+      levels,
+      durationsUs,
+    };
+  };
+
   const pushCurrent = () => {
-    if (!current || current.levels.length < minEdges) {
+    const normalized = normalizeFrameStart(current);
+    if (!normalized || normalized.levels.length < minEdges) {
       current = null;
       return;
     }
 
     frames.push({
       index: frames.length,
-      startEdgeIndex: current.startEdgeIndex,
-      endEdgeIndex: current.startEdgeIndex + current.levels.length - 1,
-      edges: current.levels.length,
-      totalUs: current.durationsUs.reduce((sum, value) => sum + value, 0),
-      levels: current.levels.slice(),
-      durationsUs: current.durationsUs.slice(),
+      startEdgeIndex: normalized.startEdgeIndex,
+      endEdgeIndex: normalized.startEdgeIndex + normalized.levels.length - 1,
+      edges: normalized.levels.length,
+      totalUs: normalized.durationsUs.reduce((sum, value) => sum + value, 0),
+      levels: normalized.levels,
+      durationsUs: normalized.durationsUs,
     });
     current = null;
   };
@@ -188,7 +221,7 @@ function renderSegmentedFrames(capture, options) {
   if (!frames.length) return null;
 
   const lines = [
-    `frames:    count=${frames.length}  silenceGap=${formatDurationUs(options.silenceGapUs)}  minEdges=${options.minEdges ?? 1}`,
+    `frames:    count=${frames.length}  silenceGap=${formatDurationUs(options.silenceGapUs)}`,
   ];
 
   for (const frame of frames) {
