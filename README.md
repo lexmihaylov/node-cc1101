@@ -55,12 +55,12 @@ Minimum SPI wiring:
 
 Typical GPIO wiring for direct async work:
 
-- `GDO0` -> a Pi GPIO input for RX, commonly `GPIO24`
-- `GDO2` -> optional Pi GPIO input for status/observation, commonly `GPIO25`
+- `GDO2` -> a Pi GPIO input for RX, commonly `GPIO25`
+- `GDO0` -> a Pi GPIO output for TX, commonly `GPIO24`
 
 Direct async wiring model:
 
-- RX/listen/record: `CC1101 GDO0 async-data output -> Raspberry Pi input GPIO`
+- RX/listen/record: `CC1101 GDO2 async-data output -> Raspberry Pi input GPIO`
 - TX/replay: `Raspberry Pi output GPIO -> CC1101 GDO0 async TX data input`
 
 These are opposite directions on the same CC1101 data pin. Run one mode at a time.
@@ -151,10 +151,10 @@ cc1101> listen 20
 cc1101> send aa 55 01
 
 cc1101> mode direct_async 433 ook
-cc1101> record /tmp/rf-captures/session-001.json 24
+cc1101> record /tmp/rf-captures/session-001.json 25
 cc1101> stop
-cc1101> show /tmp/rf-captures/session-001.json 10000
-cc1101> replay /tmp/rf-captures/session-001.json 0 10000 24 10 false
+cc1101> show /tmp/rf-captures/session-001.json 10000 250
+cc1101> replay /tmp/rf-captures/session-001.json 0 10000 250 24 10 false
 ```
 
 ### Main shell commands
@@ -166,10 +166,10 @@ cc1101> replay /tmp/rf-captures/session-001.json 0 10000 24 10 false
 - `mode [packet|direct_async] [band] [modulation]`
 - `listen [pollMs|gpio] [silenceGapUs]`
 - `send <hex-bytes...>`
-- `send <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats] [invert]`
+- `send <file> [frameIndex] [silenceGapUs] [sampleRateUs] [txDataGpio] [repeats] [invert]`
 - `record <file> [rxDataGpio]`
-- `replay <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats] [invert]`
-- `show <file> [silenceGapUs]`
+- `replay <file> [frameIndex] [silenceGapUs] [sampleRateUs] [txDataGpio] [repeats] [invert]`
+- `show <file> [silenceGapUs] [sampleRateUs]`
 - `stop`
 - `idle`
 

@@ -51,7 +51,7 @@ class CC1101StreamRecorder {
       bus: options.bus ?? 0,
       device: options.device ?? 0,
       speedHz: options.speedHz ?? 100000,
-      rxDataGpio: options.rxDataGpio ?? 24,
+      rxDataGpio: options.rxDataGpio ?? 25,
       previewIntervalMs: options.previewIntervalMs ?? 120,
       previewEdgeWindow: options.previewEdgeWindow ?? 16,
       previewWindowMs: options.previewWindowMs ?? 2400,
@@ -203,8 +203,8 @@ class CC1101StreamRecorder {
       modulation: MODULATION.OOK,
       mode: RADIO_MODE.DIRECT_ASYNC,
       gpio: {
-        gdo0: VALUE.IOCFG.ASYNC_SERIAL_DATA,
-        gdo2: VALUE.IOCFG.PQI,
+        gdo0: VALUE.IOCFG.HIGH_IMPEDANCE,
+        gdo2: VALUE.IOCFG.ASYNC_SERIAL_DATA,
       },
       packet: {
         appendStatus: false,

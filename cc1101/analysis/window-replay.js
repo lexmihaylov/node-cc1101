@@ -36,7 +36,7 @@ function sleepUs(us) {
 
 /**
  * @param {any} capture
- * @param {{ silenceGapUs?: number, frameIndex?: number }=} options
+ * @param {{ silenceGapUs?: number, frameIndex?: number, minimumPulseWidthUs?: number }=} options
  * @returns {ReplayWindow}
  */
 function buildReplayFromCapture(capture, options = {}) {
@@ -48,7 +48,8 @@ function buildReplayFromCapture(capture, options = {}) {
 
   if (capture.edges && Array.isArray(capture.edges)) {
     const silenceGapUs = Number(options.silenceGapUs ?? 10000);
-    const frames = segmentRawFrames(capture, silenceGapUs, 1);
+    const minimumPulseWidthUs = Number(options.minimumPulseWidthUs ?? 150);
+    const frames = segmentRawFrames(capture, silenceGapUs, 1, minimumPulseWidthUs);
     const frame = frames[frameIndex];
     if (!frame) {
       throw new Error(`No frame ${frameIndex} found with silenceGapUs=${silenceGapUs}`);

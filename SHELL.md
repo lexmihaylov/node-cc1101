@@ -51,8 +51,8 @@ Defaults:
 
 - `band = 433`
 - `modulation = ook`
-- `GDO0 -> GPIO24`
-- `GDO2 -> GPIO25`
+- `RX: GDO2 -> GPIO25`
+- `TX: GDO0 -> GPIO24`
 
 ## Commands
 
@@ -64,10 +64,10 @@ Defaults:
 - `mode [packet|direct_async] [band] [modulation]`
 - `listen [pollMs|gpio] [silenceGapUs]`
 - `send <hex-bytes...>`
-- `send <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats]`
+- `send <file> [frameIndex] [silenceGapUs] [sampleRateUs] [txDataGpio] [repeats] [invert]`
 - `record <file> [rxDataGpio]`
-- `replay <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats]`
-- `show <file> [silenceGapUs]`
+- `replay <file> [frameIndex] [silenceGapUs] [sampleRateUs] [txDataGpio] [repeats] [invert]`
+- `show <file> [silenceGapUs] [sampleRateUs]`
 - `stop`
 - `idle`
 - `clear`
@@ -116,7 +116,7 @@ cc1101> mode packet 433 ook
 cc1101> listen 20
 
 cc1101> mode direct_async 433 ook
-cc1101> listen 24 10000
+cc1101> listen 25 10000
 ```
 
 In direct-async mode the listener has two states:
@@ -149,7 +149,7 @@ cc1101> mode packet 433 ook
 cc1101> send aa 55 01
 
 cc1101> mode direct_async 433 ook
-cc1101> send /tmp/rf-captures/session-001.json 0 10000 24 10 false
+cc1101> send /tmp/rf-captures/session-001.json 0 10000 250 24 10 false
 ```
 
 ### `record <file> [rxDataGpio]`
@@ -159,7 +159,7 @@ Records a continuous raw direct-async edge stream to one JSON file.
 Arguments:
 
 - `file`: output JSON file
-- `rxDataGpio`: Raspberry Pi input GPIO connected to CC1101 `GDO0`, default `24`
+- `rxDataGpio`: Raspberry Pi input GPIO connected to CC1101 `GDO2`, default `25`
 
 While recording, the shell renders a continuously updating sampled live preview over the recent time window. The preview shows:
 
@@ -174,11 +174,11 @@ Example:
 
 ```text
 cc1101> mode direct_async 433 ook
-cc1101> record /tmp/rf-captures/session-001.json 24
+cc1101> record /tmp/rf-captures/session-001.json 25
 cc1101> stop
 ```
 
-### `replay <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats] [invert]`
+### `replay <file> [frameIndex] [silenceGapUs] [sampleRateUs] [txDataGpio] [repeats] [invert]`
 
 Replays a saved raw edge file through the Raspberry Pi GPIO line that feeds the CC1101 async TX data input.
 
@@ -187,6 +187,7 @@ Arguments:
 - `file`: saved raw edge JSON file
 - `frameIndex`: frame number identified from the saved stream, default `0`
 - `silenceGapUs`: silence threshold used to split the stream into frames, default `10000`
+- `sampleRateUs`: optional extracted-frame sample rate / bit duration threshold
 - `txDataGpio`: Raspberry Pi output GPIO driving CC1101 `GDO0` in TX, default `24`
 - `repeats`: number of times to transmit the sequence, default `10`
 - `invert`: invert replay polarity, default `false`
@@ -197,10 +198,10 @@ Before replay, the extracted frame is also passed through the same `150us` minim
 Example:
 
 ```text
-cc1101> replay /tmp/rf-captures/session-001.json 0 10000 24 10 false
+cc1101> replay /tmp/rf-captures/session-001.json 0 10000 250 24 10 false
 ```
 
-### `show <file> [silenceGapUs]`
+### `show <file> [silenceGapUs] [sampleRateUs]`
 
 Prints a short summary of a saved JSON file.
 
@@ -215,6 +216,7 @@ For raw edge files, `show` also renders:
 Arguments:
 
 - `silenceGapUs`: silence threshold used to split the saved stream into frames, default `10000`
+- `sampleRateUs`: optional extracted-frame sample rate / bit duration threshold
 
 Extracted frames are rendered after applying the same `150us` minimum pulse width filter used by `replay`.
 
@@ -230,15 +232,15 @@ Stops active work and sends the radio to IDLE.
 
 ```text
 cc1101> mode direct_async 433 ook
-cc1101> record /tmp/rf-captures/session-001.json 24
+cc1101> record /tmp/rf-captures/session-001.json 25
 cc1101> stop
-cc1101> show /tmp/rf-captures/session-001.json 10000
-cc1101> replay /tmp/rf-captures/session-001.json 0 10000 24 10 false
+cc1101> show /tmp/rf-captures/session-001.json 10000 250
+cc1101> replay /tmp/rf-captures/session-001.json 0 10000 250 24 10 false
 ```
 
 Direct async wiring model:
 
-- RX/listen/record: `CC1101 GDO0 async-data output -> Raspberry Pi input GPIO`
+- RX/listen/record: `CC1101 GDO2 async-data output -> Raspberry Pi input GPIO`
 - TX/replay: `Raspberry Pi output GPIO -> CC1101 GDO0 async TX data input`
 
 These are opposite directions on the same CC1101 data pin. Run one mode at a time.

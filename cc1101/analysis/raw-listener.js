@@ -1,6 +1,7 @@
 // @ts-check
 
 const { Gpio } = require("pigpio");
+const { VALUE } = require("../constants");
 const { CC1101Driver } = require("../driver");
 const { BAND, MODULATION, RADIO_MODE } = require("../profiles");
 const { sleep } = require("../utils");
@@ -37,7 +38,7 @@ class CC1101RawListener {
       bus: options.bus ?? 0,
       device: options.device ?? 0,
       speedHz: options.speedHz ?? 100000,
-      gpio: options.gpio ?? 24,
+      gpio: options.gpio ?? 25,
       silenceGapUs: options.silenceGapUs ?? 10000,
       pollMs: options.pollMs ?? 5,
       onMessage: options.onMessage ?? ((message) => console.log(message)),
@@ -159,6 +160,10 @@ class CC1101RawListener {
       band: BAND.MHZ_433,
       modulation: MODULATION.OOK,
       mode: RADIO_MODE.DIRECT_ASYNC,
+      gpio: {
+        gdo0: VALUE.IOCFG.HIGH_IMPEDANCE,
+        gdo2: VALUE.IOCFG.ASYNC_SERIAL_DATA,
+      },
     });
     await sleep(100);
 

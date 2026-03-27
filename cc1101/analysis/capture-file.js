@@ -63,13 +63,14 @@ function chooseScaleUnitUs(durationsUs, targetWidth = 72) {
 /**
  * @param {number[]} levels
  * @param {number[]} durationsUs
+ * @param {number=} bitUnitOverrideUs
  * @returns {{ bitUnitUs: number, bits: string } | null}
  */
-function renderBitStream(levels, durationsUs) {
+function renderBitStream(levels, durationsUs, bitUnitOverrideUs) {
   const candidates = durationsUs.filter((value) => Number.isFinite(value) && value > 125);
-  if (!candidates.length) return null;
-
-  const bitUnitUs = Math.min(...candidates);
+  const bitUnitUs = bitUnitOverrideUs && bitUnitOverrideUs > 0
+    ? bitUnitOverrideUs
+    : (candidates.length ? Math.min(...candidates) : 0);
   if (!Number.isFinite(bitUnitUs) || bitUnitUs <= 0) return null;
 
   const bits = durationsUs.map((dtUs, index) => {
@@ -278,7 +279,7 @@ function segmentRawFrames(capture, silenceGapUs, minEdges = 1, minimumPulseWidth
 
 /**
  * @param {any} capture
- * @param {{ targetWidth?: number, maxLabels?: number, minimumPulseWidthUs?: number }=} options
+ * @param {{ targetWidth?: number, maxLabels?: number, minimumPulseWidthUs?: number, bitUnitUs?: number }=} options
  * @returns {string | null}
  */
 function renderRawSignal(capture, options = {}) {
@@ -301,7 +302,7 @@ function renderRawSignal(capture, options = {}) {
     const width = Math.max(1, Math.round(dtUs / unitUs));
     return (levels[index] ? "▀" : "▄").repeat(width);
   }).join("");
-  const bitStream = renderBitStream(levels, durationsUs);
+  const bitStream = renderBitStream(levels, durationsUs, options.bitUnitUs);
   const labels = durationsUs
     .slice(0, options.maxLabels ?? 24)
     .map((dtUs, index) => `${levels[index]}@${formatDurationUs(dtUs)}`)
@@ -325,7 +326,7 @@ function renderRawSignal(capture, options = {}) {
 
 /**
  * @param {any} capture
- * @param {{ silenceGapUs: number, minEdges?: number, targetWidth?: number, maxLabels?: number, minimumPulseWidthUs?: number }} options
+ * @param {{ silenceGapUs: number, minEdges?: number, targetWidth?: number, maxLabels?: number, minimumPulseWidthUs?: number, bitUnitUs?: number }} options
  * @returns {string | null}
  */
 function renderSegmentedFrames(capture, options) {
@@ -347,6 +348,7 @@ function renderSegmentedFrames(capture, options) {
     lines.push(renderRawSignal(frame, {
       targetWidth: options.targetWidth,
       maxLabels: options.maxLabels,
+      bitUnitUs: options.bitUnitUs,
     }) ?? "signal:    unavailable");
   }
 
