@@ -4,6 +4,11 @@ const fs = require("fs");
 const path = require("path");
 
 const DEFAULT_MINIMUM_PULSE_WIDTH_US = 150;
+const ANSI = {
+  reset: "\u001b[0m",
+  red: "\u001b[31m",
+  green: "\u001b[32m",
+};
 
 /**
  * @typedef {object} CaptureFileSummary
@@ -53,6 +58,33 @@ function chooseScaleUnitUs(durationsUs, targetWidth = 72) {
   const totalUs = durationsUs.reduce((sum, value) => sum + Math.max(0, value), 0);
   if (totalUs <= 0) return 1;
   return Math.max(1, Math.ceil(totalUs / targetWidth));
+}
+
+/**
+ * @param {number[]} levels
+ * @param {number[]} durationsUs
+ * @returns {{ bitUnitUs: number, bits: string } | null}
+ */
+function renderBitStream(levels, durationsUs) {
+  const candidates = durationsUs.filter((value) => Number.isFinite(value) && value > 125);
+  if (!candidates.length) return null;
+
+  const bitUnitUs = Math.min(...candidates);
+  if (!Number.isFinite(bitUnitUs) || bitUnitUs <= 0) return null;
+
+  const bits = durationsUs.map((dtUs, index) => {
+    if (index === 0 && dtUs === 0) return "";
+
+    const width = Math.max(1, Math.round(dtUs / bitUnitUs));
+    const symbol = levels[index] ? "1" : "0";
+    const color = levels[index] ? ANSI.green : ANSI.red;
+    return `${color}${symbol.repeat(width)}${ANSI.reset}`;
+  }).join("");
+
+  return {
+    bitUnitUs,
+    bits,
+  };
 }
 
 /**
@@ -269,17 +301,26 @@ function renderRawSignal(capture, options = {}) {
     const width = Math.max(1, Math.round(dtUs / unitUs));
     return (levels[index] ? "▀" : "▄").repeat(width);
   }).join("");
+  const bitStream = renderBitStream(levels, durationsUs);
   const labels = durationsUs
     .slice(0, options.maxLabels ?? 24)
     .map((dtUs, index) => `${levels[index]}@${formatDurationUs(dtUs)}`)
     .join("  ");
 
-  return [
+  const lines = [
     `signal:    edges=${durationsUs.length}  total=${formatDurationUs(totalUs)}  scale=1col:${formatDurationUs(unitUs)}`,
     `shape:     ${shape}`,
     `timeline:  ${timeline}`,
-    `edges:     ${labels}${durationsUs.length > (options.maxLabels ?? 24) ? "  ..." : ""}`,
-  ].join("\n");
+  ];
+
+  if (bitStream) {
+    lines.push(`bitUnit:   ${formatDurationUs(bitStream.bitUnitUs)}`);
+    lines.push(`bits:      ${bitStream.bits}`);
+  }
+
+  lines.push(`edges:     ${labels}${durationsUs.length > (options.maxLabels ?? 24) ? "  ..." : ""}`);
+
+  return lines.join("\n");
 }
 
 /**

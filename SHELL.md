@@ -130,6 +130,7 @@ Each printed raw signal includes:
 
 - `shape`: one Unicode bar-height symbol per edge, scaled by relative duration within that signal
 - `timeline`: a stretched high/low bar view over time
+- `bits`: a colored bit view derived from the smallest edge duration over `125us`
 - `edges`: the raw `level@duration` values
 
 Live `listen` output is raw and unfiltered.
@@ -208,6 +209,7 @@ For raw edge files, `show` also renders:
 - `frames`: segmentation summary using the supplied silence threshold
 - `shape`: compact per-edge duration shape
 - `timeline`: scaled high/low timing view
+- `bits`: colored bit view derived from the smallest edge duration over `125us`
 - `edges`: raw `level@duration` labels
 
 Arguments:

@@ -190,6 +190,7 @@ During direct-async `listen` and `show`, raw signals are also rendered with:
 
 - a compact `shape` row using Unicode bar-height symbols per edge
 - a scaled `timeline` row using high/low bar segments stretched across time
+- a colored `bits` row derived from the smallest edge duration over `125us`, with `1` in green and `0` in red
 
 This is display-only scaling. Stored timings remain raw microseconds.
 
