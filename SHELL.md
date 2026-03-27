@@ -122,6 +122,11 @@ Arguments:
 - `dwellMs`: settle time after each retune, default `20`
 - `samples`: number of RSSI reads averaged per point, default `3`
 
+For `spectrum live`, the defaults are tuned for responsiveness instead:
+
+- `dwellMs`: default `8`
+- `samples`: default `1`
+
 If `startMHz` and `stopMHz` are omitted, the shell uses a small default span around the current band:
 
 - `315`: `314-316 MHz`
@@ -138,7 +143,7 @@ cc1101> spectrum 433.7 434.2 25 25 5
 cc1101> spectrum 868.0 869.0 100 15 2
 ```
 
-`spectrum live` repeats the sweep continuously and redraws the terminal with braille-style cells for a denser graph. Stop it with `stop` or Ctrl+C.
+`spectrum live` repeats the sweep continuously and redraws the terminal with braille-style cells for a denser graph. It uses a faster scan path than the one-shot sweep so the preview updates more quickly. Stop it with `stop` or Ctrl+C.
 
 This is a received-power sweep using RSSI. It is not an IQ capture, waterfall, or protocol decoder.
 

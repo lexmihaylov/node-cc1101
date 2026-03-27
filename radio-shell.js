@@ -142,6 +142,7 @@ const MANUALS = {
     "  and prints a terminal spectrum view using the current band/modulation preset.",
     "  `spectrum live` repeats that sweep continuously and redraws the terminal",
     "  using a braille-style graph for higher density.",
+    "  Live mode defaults to dwellMs=8 and samples=1 for faster refresh.",
     "  This is a received-power sweep, not an IQ or waterfall display.",
     "",
     "EXAMPLES",
@@ -531,6 +532,17 @@ function normalizeSpectrumArgs(startMHz, stopMHz, stepKHz, dwellMs, samples, ban
   };
 }
 
+function normalizeLiveSpectrumArgs(startMHz, stopMHz, stepKHz, dwellMs, samples, band) {
+  return normalizeSpectrumArgs(
+    startMHz,
+    stopMHz,
+    stepKHz ?? 50,
+    dwellMs ?? 8,
+    samples ?? 1,
+    band
+  );
+}
+
 function parseLine(line) {
   const tokens = [];
   const matches = line.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
@@ -758,10 +770,7 @@ class RadioShell {
     console.log(renderSpectrum(points, config.stepKHz));
   }
 
-  async collectSpectrumSweep(config) {
-    /** @type {{ freqMHz: number, rssiDbm: number }[]} */
-    const points = [];
-
+  async prepareSpectrumSweep() {
     await this.radio.configureRadio({
       ...this.radioConfig,
       mode: RADIO_MODE.PACKET,
@@ -771,6 +780,36 @@ class RadioShell {
         length: 1,
       },
     });
+  }
+
+  async readSpectrumRssi(sampleCount, fastMode = false) {
+    let rssiTotal = 0;
+    for (let i = 0; i < sampleCount; i += 1) {
+      const rssiRaw = fastMode
+        ? await this.radio.getRssi()
+        : await stableRead(this.radio, STATUS.RSSI);
+      rssiTotal += decodeRssi(rssiRaw);
+      if (i + 1 < sampleCount) {
+        await sleep(fastMode ? 1 : 2);
+      }
+    }
+
+    return rssiTotal / sampleCount;
+  }
+
+  async collectSpectrumSweep(config, options = {}) {
+    const fastMode = Boolean(options.fastMode);
+    const reconfigure = options.reconfigure !== false;
+    /** @type {{ freqMHz: number, rssiDbm: number }[]} */
+    const points = [];
+
+    if (reconfigure) {
+      await this.prepareSpectrumSweep();
+    }
+
+    if (fastMode) {
+      await this.radio.enterRxSafe();
+    }
 
     for (
       let freqMHz = config.startMHz;
@@ -778,26 +817,21 @@ class RadioShell {
       freqMHz += config.stepMHz
     ) {
       const roundedFreqMHz = Number(freqMHz.toFixed(6));
-      await this.radio.idle();
       await this.radio.setFrequencyMHz(roundedFreqMHz);
-      await this.radio.enterRxSafe();
+
+      if (fastMode) {
+        await this.radio.enterRx();
+      } else {
+        await this.radio.enterRxSafe();
+      }
 
       if (config.dwellMs > 0) {
         await sleep(config.dwellMs);
       }
 
-      let rssiTotal = 0;
-      for (let i = 0; i < config.samples; i += 1) {
-        const rssiRaw = await stableRead(this.radio, STATUS.RSSI);
-        rssiTotal += decodeRssi(rssiRaw);
-        if (i + 1 < config.samples) {
-          await sleep(2);
-        }
-      }
-
       points.push({
         freqMHz: roundedFreqMHz,
-        rssiDbm: rssiTotal / config.samples,
+        rssiDbm: await this.readSpectrumRssi(config.samples, fastMode),
       });
     }
 
@@ -808,7 +842,7 @@ class RadioShell {
     await this.ensureConnected();
     await this.stop();
 
-    const config = normalizeSpectrumArgs(
+    const config = normalizeLiveSpectrumArgs(
       startMHz,
       stopMHz,
       stepKHz,
@@ -829,9 +863,13 @@ class RadioShell {
 
     this.runtime = runtime;
     let sweepCount = 0;
+    await this.prepareSpectrumSweep();
 
     while (runtime.active) {
-      const points = await this.collectSpectrumSweep(config);
+      const points = await this.collectSpectrumSweep(config, {
+        fastMode: true,
+        reconfigure: false,
+      });
       if (!runtime.active) break;
       sweepCount += 1;
       process.stdout.write("\u001b[2J\u001b[H");
