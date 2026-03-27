@@ -20,6 +20,8 @@ const { renderSignalSummary } = require("./signal-renderer");
  * @property {number=} baseUs
  * @property {number=} previewIntervalMs
  * @property {number=} previewEdgeWindow
+ * @property {number=} previewWindowMs
+ * @property {number=} previewSampleMs
  * @property {string=} filepath
  * @property {(message: string) => void=} onMessage
  * @property {(frame: string) => void=} onPreview
@@ -58,8 +60,10 @@ class CC1101StreamRecorder {
       rxDataGpio: options.rxDataGpio ?? 24,
       minDtUs: options.minDtUs ?? 80,
       baseUs: options.baseUs ?? 400,
-      previewIntervalMs: options.previewIntervalMs ?? 500,
+      previewIntervalMs: options.previewIntervalMs ?? 120,
       previewEdgeWindow: options.previewEdgeWindow ?? 48,
+      previewWindowMs: options.previewWindowMs ?? 2400,
+      previewSampleMs: options.previewSampleMs ?? 25,
       filepath: options.filepath ?? "/tmp/rf-stream.json",
       onMessage: options.onMessage ?? ((message) => console.log(message)),
       onPreview: options.onPreview ?? ((frame) => console.log(frame)),
@@ -76,33 +80,100 @@ class CC1101StreamRecorder {
     this.edges = [];
   }
 
-  emitPreview() {
-    if (this.edges.length === 0 || this.edges.length === this.lastPreviewCount) return;
+  /**
+   * @param {RecordedStreamEdge[]} recent
+   * @param {number} now
+   * @returns {string}
+   */
+  renderSampledRaster(recent, now) {
+    const bucketCount = Math.max(8, Math.floor(this.options.previewWindowMs / this.options.previewSampleMs));
+    const samples = new Array(bucketCount).fill(null).map(() => ({
+      hits: 0,
+      level: null,
+      maxUnits: 0,
+    }));
+    const startMs = now - this.options.previewWindowMs;
 
+    for (const edge of recent) {
+      const offsetMs = edge.wallclockMs - startMs;
+      const index = Math.floor(offsetMs / this.options.previewSampleMs);
+      if (index < 0 || index >= bucketCount) continue;
+
+      const bucket = samples[index];
+      bucket.hits += 1;
+      bucket.level = edge.level;
+      bucket.maxUnits = Math.max(bucket.maxUnits, Math.max(1, Math.round(edge.dtUs / this.options.baseUs)));
+    }
+
+    const activity = samples.map((bucket) => {
+      if (bucket.hits === 0) return " ";
+      if (bucket.hits === 1) return ".";
+      if (bucket.hits <= 3) return ":";
+      if (bucket.hits <= 6) return "*";
+      return "#";
+    }).join("");
+
+    const level = samples.map((bucket) => {
+      if (bucket.hits === 0 || bucket.level === null) return " ";
+      return bucket.level ? "▀" : "▄";
+    }).join("");
+
+    const size = samples.map((bucket) => {
+      if (bucket.hits === 0) return " ";
+      if (bucket.maxUnits <= 1) return "s";
+      if (bucket.maxUnits <= 3) return "m";
+      if (bucket.maxUnits <= 6) return "l";
+      return "x";
+    }).join("");
+
+    return [
+      `time:   ${activity}`,
+      `level:  ${level}`,
+      `scale:  ${size}`,
+      `legend: activity[ . : * # ]  size[ s m l x ]  sample=${this.options.previewSampleMs}ms  span=${this.options.previewWindowMs}ms`,
+    ].join("\n");
+  }
+
+  emitPreview() {
+    const now = Date.now();
+    const recent = this.edges.filter((edge) => edge.wallclockMs >= now - this.options.previewWindowMs);
     this.lastPreviewCount = this.edges.length;
-    const recent = this.edges.slice(-this.options.previewEdgeWindow);
-    const levels = recent.map((edge) => edge.level);
-    const durationsUs = recent.map((edge) => edge.dtUs);
-    const units = durationsUs.map((duration) => Math.max(1, Math.round(duration / this.options.baseUs)));
+    const recentTail = recent.slice(-this.options.previewEdgeWindow);
+    const tailLevels = recentTail.map((edge) => edge.level);
+    const tailDurationsUs = recentTail.map((edge) => edge.dtUs);
+    const tailUnits = tailDurationsUs.map((duration) => Math.max(1, Math.round(duration / this.options.baseUs)));
+    const lines = [
+      `preview totalEdges=${this.edges.length} recentEdges=${recent.length} recentTail=${recentTail.length}`,
+      this.renderSampledRaster(recent, now),
+    ];
+
+    if (recentTail.length === 0) {
+      lines.push("wave:   ");
+      lines.push("class:  ");
+      lines.push("unit:   ");
+      lines.push("note:   no edges in preview window");
+      this.options.onPreview(lines.join("\n"));
+      return;
+    }
+
     const frame = {
       ts: new Date().toISOString(),
       reason: "preview",
       triggerRssi: null,
-      edges: recent.length,
-      durationsUs,
-      levels,
+      edges: recentTail.length,
+      durationsUs: tailDurationsUs,
+      levels: tailLevels,
     };
     const summary = summarizeFrame(frame);
-    const lines = [
-      `preview totalEdges=${this.edges.length} recentEdges=${recent.length}`,
+    lines.push(
       ...renderSignalSummary({
         label: "preview",
-        units,
-        levels,
-        durationsUs,
+        units: tailUnits,
+        levels: tailLevels,
+        durationsUs: tailDurationsUs,
         maxSteps: 24,
-      }),
-    ];
+      })
+    );
 
     if (summary) {
       lines.push(`raster: ${renderBars(summary.units, 48)}`);

@@ -149,7 +149,7 @@ cc1101> send /tmp/rf-captures/session-001.stable-frame.json 24 normalized 10 400
 
 Records a continuous direct-async edge stream to one JSON file. Use this when you want multiple clicks or presses in one recording and want to extract repeating patterns later.
 
-While recording, the shell renders a continuously updating live preview of recent edges, quantized timing units, and best-effort segment bits when enough recent data is available.
+While recording, the shell renders a continuously updating sampled live preview over the recent time window, along with quantized timing units and best-effort segment bits when enough recent data is available.
 
 Example:
 

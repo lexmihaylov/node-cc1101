@@ -215,7 +215,7 @@ cc1101> man listen
 cc1101> man decode
 ```
 
-During `record`, the shell renders a continuously updating live preview of recent edges, quantized timing units, and best-effort segment bits while still saving the full raw stream.
+During `record`, the shell renders a continuously updating sampled live preview over the recent time window, along with quantized timing units and best-effort segment bits while still saving the full raw stream.
 
 ## Project structure
 

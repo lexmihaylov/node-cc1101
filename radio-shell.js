@@ -227,8 +227,8 @@ const MANUALS = {
     "DESCRIPTION",
     "  This does not try to isolate one frame while recording.",
     "  It stores the raw stream so later analysis can find repeated patterns across multiple clicks.",
-    "  While recording, the shell renders a continuously updating live preview of recent edges,",
-    "  timing units, and best-effort segment bits when enough data is available.",
+    "  While recording, the shell renders a continuously updating sampled live preview over the",
+    "  recent time window, plus timing units and best-effort segment bits when enough data is available.",
     "  Finish with `stop`.",
   ].join("\n"),
   analyze: [
