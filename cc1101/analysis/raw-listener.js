@@ -4,7 +4,7 @@ const { Gpio } = require("pigpio");
 const { CC1101Driver } = require("../driver");
 const { BAND, MODULATION, RADIO_MODE } = require("../profiles");
 const { sleep } = require("../utils");
-const { renderRawSignal } = require("./capture-file");
+const { DEFAULT_GLITCH_PULSE_US, renderRawSignal } = require("./capture-file");
 
 /**
  * @typedef {"silence" | "signal_detected"} RawListenerState
@@ -45,7 +45,9 @@ class CC1101RawListener {
         this.options.onMessage("---- raw signal ----");
         this.options.onMessage(`ts:          ${frame.ts}`);
         this.options.onMessage(`reason:      ${frame.reason}`);
-        const rendered = renderRawSignal(frame);
+        const rendered = renderRawSignal(frame, {
+          glitchPulseUs: DEFAULT_GLITCH_PULSE_US,
+        });
         if (rendered) {
           this.options.onMessage(rendered);
         } else {

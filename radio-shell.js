@@ -5,6 +5,7 @@ const readline = require("readline");
 const { CC1101RawListener } = require("./cc1101/analysis/raw-listener");
 const { CC1101StreamRecorder } = require("./cc1101/analysis/stream-recorder");
 const {
+  DEFAULT_GLITCH_PULSE_US,
   loadCaptureFile,
   renderRawSignal,
   renderSegmentedFrames,
@@ -199,7 +200,8 @@ const MANUALS = {
     "",
     "DESCRIPTION",
     "  Use `send` instead of separate TX verbs. In packet mode it writes FIFO data.",
-    "  In direct_async mode it replays the saved raw edge timing file.",
+    "  In direct_async mode it replays the saved raw edge timing file after applying",
+    `  the built-in short pulse glitch suppressor (${DEFAULT_GLITCH_PULSE_US} us).`,
   ].join("\n"),
   record: [
     "NAME",
@@ -245,6 +247,8 @@ const MANUALS = {
     "  Stops active work, puts the radio into direct async TX, segments the file into frames",
     "  using the supplied silence threshold, and replays the selected frame as recorded edge events",
     "  rebased to the start of that frame.",
+    `  A built-in short pulse glitch suppressor (${DEFAULT_GLITCH_PULSE_US} us) is applied`,
+    "  to the extracted frame before replay.",
   ].join("\n"),
   show: [
     "NAME",
@@ -265,6 +269,8 @@ const MANUALS = {
     "  each frame with a compact shape row and a scaled high/low timeline so similar captures",
     "  can be compared visually without changing the stored timings.",
     "  Every identified frame is shown, including single-edge frames.",
+    `  A built-in short pulse glitch suppressor (${DEFAULT_GLITCH_PULSE_US} us) is applied`,
+    "  to extracted frames before rendering.",
   ].join("\n"),
   stop: [
     "NAME",
@@ -684,7 +690,9 @@ class RadioShell {
       return;
     }
 
-    const rendered = renderRawSignal(capture);
+    const rendered = renderRawSignal(capture, {
+      glitchPulseUs: DEFAULT_GLITCH_PULSE_US,
+    });
     if (rendered) {
       console.log("");
       console.log(rendered);

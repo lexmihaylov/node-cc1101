@@ -3,6 +3,8 @@
 const fs = require("fs");
 const path = require("path");
 
+const DEFAULT_GLITCH_PULSE_US = 150;
+
 /**
  * @typedef {object} CaptureFileSummary
  * @property {string | null} ts
@@ -16,6 +18,7 @@ const path = require("path");
  * @typedef {object} RawSignal
  * @property {number[]} levels
  * @property {number[]} durationsUs
+ * @property {number=} suppressedEdges
  *
  * @typedef {object} SegmentedFrame
  * @property {number} index
@@ -25,6 +28,7 @@ const path = require("path");
  * @property {number} totalUs
  * @property {number[]} levels
  * @property {number[]} durationsUs
+ * @property {number=} suppressedEdges
  */
 
 const SPARK_BARS = "▁▂▃▄▅▆▇█";
@@ -74,12 +78,75 @@ function extractRawSignal(capture) {
 }
 
 /**
+ * Collapse very short pulse glitches without mutating the original raw stream.
+ * A glitch pulse is treated as a brief excursion that returns to the previous
+ * level after `glitchPulseUs` or less.
+ *
+ * @param {RawSignal} signal
+ * @param {number} glitchPulseUs
+ * @returns {RawSignal}
+ */
+function suppressGlitchPulses(signal, glitchPulseUs = DEFAULT_GLITCH_PULSE_US) {
+  const levels = signal.levels.slice();
+  const durationsUs = signal.durationsUs.slice();
+
+  if (glitchPulseUs <= 0 || levels.length < 3 || levels.length !== durationsUs.length) {
+    return {
+      levels,
+      durationsUs,
+      suppressedEdges: 0,
+    };
+  }
+
+  let suppressedEdges = 0;
+  let index = 0;
+
+  while (index < levels.length - 2) {
+    const beforeUs = durationsUs[index];
+    const pulseWidthUs = durationsUs[index + 1];
+    const afterUs = durationsUs[index + 2];
+    const longContext = Math.max(index === 0 ? 0 : beforeUs, afterUs);
+
+    if (
+      pulseWidthUs <= 0 ||
+      pulseWidthUs > glitchPulseUs ||
+      longContext < pulseWidthUs * 4
+    ) {
+      index += 1;
+      continue;
+    }
+
+    if (index === 0) {
+      levels.splice(0, 2);
+      durationsUs.splice(0, 2);
+      if (durationsUs.length > 0) durationsUs[0] = 0;
+      suppressedEdges += 2;
+      index = 0;
+      continue;
+    }
+
+    durationsUs[index + 2] += durationsUs[index] + durationsUs[index + 1];
+    levels.splice(index, 2);
+    durationsUs.splice(index, 2);
+    suppressedEdges += 2;
+    index = Math.max(0, index - 1);
+  }
+
+  return {
+    levels,
+    durationsUs,
+    suppressedEdges,
+  };
+}
+
+/**
  * @param {any} capture
  * @param {number} silenceGapUs
  * @param {number} minEdges
+ * @param {number} glitchPulseUs
  * @returns {SegmentedFrame[]}
  */
-function segmentRawFrames(capture, silenceGapUs, minEdges = 1) {
+function segmentRawFrames(capture, silenceGapUs, minEdges = 1, glitchPulseUs = DEFAULT_GLITCH_PULSE_US) {
   const signal = extractRawSignal(capture);
   if (!signal) return [];
 
@@ -125,7 +192,10 @@ function segmentRawFrames(capture, silenceGapUs, minEdges = 1) {
 
   const pushCurrent = () => {
     const normalized = normalizeFrameStart(current);
-    if (!normalized || normalized.levels.length < minEdges) {
+    const filtered = normalized
+      ? suppressGlitchPulses(normalized, glitchPulseUs)
+      : null;
+    if (!filtered || filtered.levels.length < minEdges) {
       current = null;
       return;
     }
@@ -133,11 +203,12 @@ function segmentRawFrames(capture, silenceGapUs, minEdges = 1) {
     frames.push({
       index: frames.length,
       startEdgeIndex: normalized.startEdgeIndex,
-      endEdgeIndex: normalized.startEdgeIndex + normalized.levels.length - 1,
-      edges: normalized.levels.length,
-      totalUs: normalized.durationsUs.reduce((sum, value) => sum + value, 0),
-      levels: normalized.levels,
-      durationsUs: normalized.durationsUs,
+      endEdgeIndex: normalized.startEdgeIndex + filtered.levels.length - 1,
+      edges: filtered.levels.length,
+      totalUs: filtered.durationsUs.reduce((sum, value) => sum + value, 0),
+      levels: filtered.levels,
+      durationsUs: filtered.durationsUs,
+      suppressedEdges: filtered.suppressedEdges,
     });
     current = null;
   };
@@ -175,11 +246,14 @@ function segmentRawFrames(capture, silenceGapUs, minEdges = 1) {
 
 /**
  * @param {any} capture
- * @param {{ targetWidth?: number, maxLabels?: number }=} options
+ * @param {{ targetWidth?: number, maxLabels?: number, glitchPulseUs?: number }=} options
  * @returns {string | null}
  */
 function renderRawSignal(capture, options = {}) {
-  const signal = extractRawSignal(capture);
+  const rawSignal = extractRawSignal(capture);
+  const signal = rawSignal
+    ? suppressGlitchPulses(rawSignal, options.glitchPulseUs ?? 0)
+    : null;
   if (!signal) return null;
 
   const levels = signal.levels;
@@ -204,7 +278,7 @@ function renderRawSignal(capture, options = {}) {
     .join("  ");
 
   return [
-    `signal:    edges=${durationsUs.length}  total=${formatDurationUs(totalUs)}  scale=1col:${formatDurationUs(unitUs)}`,
+    `signal:    edges=${durationsUs.length}  total=${formatDurationUs(totalUs)}  scale=1col:${formatDurationUs(unitUs)}${signal.suppressedEdges ? `  suppressed=${signal.suppressedEdges}` : ""}`,
     `shape:     ${shape}`,
     `timeline:  ${timeline}`,
     `edges:     ${labels}${durationsUs.length > (options.maxLabels ?? 24) ? "  ..." : ""}`,
@@ -213,23 +287,29 @@ function renderRawSignal(capture, options = {}) {
 
 /**
  * @param {any} capture
- * @param {{ silenceGapUs: number, minEdges?: number, targetWidth?: number, maxLabels?: number }} options
+ * @param {{ silenceGapUs: number, minEdges?: number, targetWidth?: number, maxLabels?: number, glitchPulseUs?: number }} options
  * @returns {string | null}
  */
 function renderSegmentedFrames(capture, options) {
-  const frames = segmentRawFrames(capture, options.silenceGapUs, options.minEdges ?? 1);
+  const frames = segmentRawFrames(
+    capture,
+    options.silenceGapUs,
+    options.minEdges ?? 1,
+    options.glitchPulseUs ?? DEFAULT_GLITCH_PULSE_US
+  );
   if (!frames.length) return null;
 
   const lines = [
-    `frames:    count=${frames.length}  silenceGap=${formatDurationUs(options.silenceGapUs)}`,
+    `frames:    count=${frames.length}  silenceGap=${formatDurationUs(options.silenceGapUs)}  glitchPulse=${formatDurationUs(options.glitchPulseUs ?? DEFAULT_GLITCH_PULSE_US)}`,
   ];
 
   for (const frame of frames) {
     lines.push("");
-    lines.push(`frame[${frame.index}] edges=${frame.edges} sourceEdges=${frame.startEdgeIndex}..${frame.endEdgeIndex} total=${formatDurationUs(frame.totalUs)}`);
+    lines.push(`frame[${frame.index}] edges=${frame.edges} sourceEdges=${frame.startEdgeIndex}..${frame.endEdgeIndex} total=${formatDurationUs(frame.totalUs)}${frame.suppressedEdges ? ` suppressed=${frame.suppressedEdges}` : ""}`);
     lines.push(renderRawSignal(frame, {
       targetWidth: options.targetWidth,
       maxLabels: options.maxLabels,
+      glitchPulseUs: 0,
     }) ?? "signal:    unavailable");
   }
 
@@ -283,11 +363,13 @@ function summarizeCaptureFile(capture) {
 
 module.exports = {
   buildCaptureFilepath,
+  DEFAULT_GLITCH_PULSE_US,
   extractRawSignal,
   loadCaptureFile,
   renderRawSignal,
   renderSegmentedFrames,
   saveCaptureFile,
   segmentRawFrames,
+  suppressGlitchPulses,
   summarizeCaptureFile,
 };

@@ -191,6 +191,8 @@ During direct-async `listen` and `show`, raw signals are also rendered with:
 
 This is display-only scaling. Stored timings remain raw microseconds.
 
+When signals are rendered, segmented for `show`, or extracted for `replay`, a built-in short pulse glitch suppressor removes brief pulse-pairs up to `150us` when they sit next to much longer timing. The saved raw stream is not modified.
+
 For saved raw streams, `show` uses the supplied `silenceGapUs` to split the recording into frames. `replay` uses the same silence rule and frame index, then replays that frame rebased to time zero so the leading silence before the frame is not transmitted.
 Single-edge signals and single-edge frames are kept.
 
