@@ -545,13 +545,16 @@ All analysis modules live in:
 
 - [`cc1101/analysis/`](/home/lex/projects/node-cc1101/cc1101/analysis)
 
-Most runtime-style modules expose a class with:
+The streamlined analysis surface keeps a small set of reusable modules for raw listen, stream recording, stream analysis, protocol decoding, and replay.
 
-- a constructor accepting options
-- `start(): Promise<void>`
-- `stop(): Promise<void>`
+Protocol decoder names currently implemented in [`protocol-analysis.js`](/home/lex/projects/node-cc1101/cc1101/analysis/protocol-analysis.js):
 
-### Capture/replay modules
+- `ev1527_like`
+- `pt2262_like`
+- `generic_pwm_13`
+- `pulse_distance_like`
+
+### File and replay modules
 
 #### [`capture-file.js`](/home/lex/projects/node-cc1101/cc1101/analysis/capture-file.js)
 
@@ -562,30 +565,7 @@ Functions:
 - `loadCaptureFile(filepath)`
 - `summarizeCaptureFile(capture)`
 
-Use this for saving/loading normalized capture JSON files.
-
-#### [`window-capture.js`](/home/lex/projects/node-cc1101/cc1101/analysis/window-capture.js)
-
-Class:
-
-- `CC1101WindowCapture`
-
-Purpose:
-
-- RSSI-triggered capture windows
-- quantized edge capture
-- save-to-file workflows
-
-Constructor options include:
-
-- SPI options
-- `gdo0`
-- `threshold`
-- `baseUs`
-- `beforeMs`
-- `afterMs`
-- `outDir`
-- callbacks like `onMessage` and `onCapture`
+Use this for saving/loading stream, frame, and replay JSON files.
 
 #### [`window-replay.js`](/home/lex/projects/node-cc1101/cc1101/analysis/window-replay.js)
 
@@ -596,10 +576,36 @@ Exports:
 
 Purpose:
 
-- create replay buffers from capture files
+- create replay buffers from saved frame/capture files
 - replay through GPIO in raw or normalized mode
 
-### Raw analysis modules
+### Runtime modules
+
+#### [`raw-listener.js`](/home/lex/projects/node-cc1101/cc1101/analysis/raw-listener.js)
+
+Class:
+
+- `CC1101RawListener`
+
+Purpose:
+
+- trigger on RSSI
+- capture raw edge windows from one GPIO
+- produce summarized frame output
+
+#### [`stream-recorder.js`](/home/lex/projects/node-cc1101/cc1101/analysis/stream-recorder.js)
+
+Class:
+
+- `CC1101StreamRecorder`
+
+Purpose:
+
+- record one continuous direct-async edge stream
+- save it as JSON when stopped
+- support multi-click recordings for later offline analysis
+
+### Pure analysis modules
 
 #### [`raw-analysis.js`](/home/lex/projects/node-cc1101/cc1101/analysis/raw-analysis.js)
 
@@ -618,22 +624,6 @@ Pure helpers:
 - `renderWaveform`
 - `summarizeFrame`
 
-Use these when you already have raw edge durations and want summary/decoding helpers without GPIO runtime code.
-
-#### [`raw-listener.js`](/home/lex/projects/node-cc1101/cc1101/analysis/raw-listener.js)
-
-Class:
-
-- `CC1101RawListener`
-
-Purpose:
-
-- trigger on RSSI
-- capture raw edge windows from one GPIO
-- produce summarized frame output
-
-### Protocol analysis modules
-
 #### [`protocol-analysis.js`](/home/lex/projects/node-cc1101/cc1101/analysis/protocol-analysis.js)
 
 Pure helpers:
@@ -651,41 +641,6 @@ Pure helpers:
 - `decodePt2262Like`
 - `decodeGenericPwm13`
 - `decodePulseDistanceLike`
-
-Use this for pure protocol scoring and decoding.
-
-#### [`protocol-detector.js`](/home/lex/projects/node-cc1101/cc1101/analysis/protocol-detector.js)
-
-Class:
-
-- `CC1101ProtocolDetector`
-
-Purpose:
-
-- configure the radio for direct async receive
-- collect edges from `pigpio`
-- rank protocol candidates
-
-Constructor options include:
-
-- `gdo0`
-- `threshold`
-- `baseUs`
-- `onMessage`
-- `onCandidate`
-
-#### [`protocol-listener.js`](/home/lex/projects/node-cc1101/cc1101/analysis/protocol-listener.js)
-
-Class:
-
-- `CC1101ProtocolListener`
-
-Purpose:
-
-- listen for a chosen protocol family
-- decode best candidate frames continuously
-
-### Generic signal-analysis modules
 
 #### [`signal-analysis.js`](/home/lex/projects/node-cc1101/cc1101/analysis/signal-analysis.js)
 
@@ -709,104 +664,19 @@ Pure helpers:
 - `buildConsensus`
 - `matchMask`
 
-Use this for generic timing/consensus logic independent of a specific protocol family.
+#### [`stream-analysis.js`](/home/lex/projects/node-cc1101/cc1101/analysis/stream-analysis.js)
 
-#### [`signal-detector.js`](/home/lex/projects/node-cc1101/cc1101/analysis/signal-detector.js)
+Exports:
 
-Class:
-
-- `CC1101SignalDetector`
-
-Purpose:
-
-- RSSI-triggered frame detection
-- timing grid estimation
-- candidate frame ranking
-
-#### [`fixed-timing-detector.js`](/home/lex/projects/node-cc1101/cc1101/analysis/fixed-timing-detector.js)
-
-Class:
-
-- `CC1101FixedTimingDetector`
+- `analyzeRecordedStream(stream, options?)`
+- `buildStableFramePath(sourcePath)`
 
 Purpose:
 
-- same broad workflow as signal detector
-- uses a caller-supplied fixed base timing
-
-#### [`segment-collector.js`](/home/lex/projects/node-cc1101/cc1101/analysis/segment-collector.js)
-
-Class:
-
-- `CC1101SegmentCollector`
-
-Purpose:
-
-- collect repeated presses
-- quantize to units
-- split into segments
-- compare recent captures
-
-#### [`window-consensus.js`](/home/lex/projects/node-cc1101/cc1101/analysis/window-consensus.js)
-
-Class:
-
-- `CC1101WindowConsensus`
-
-Purpose:
-
-- capture windows around RSSI triggers
-- build a running consensus across recent slices
-
-#### [`live-visualizer.js`](/home/lex/projects/node-cc1101/cc1101/analysis/live-visualizer.js)
-
-Class:
-
-- `CC1101LiveVisualizer`
-
-Purpose:
-
-- terminal visualization of GDO0, GDO2, RSSI, and trigger windows
-
-### Frame extraction/stabilization modules
-
-#### [`frame-extractor.js`](/home/lex/projects/node-cc1101/cc1101/analysis/frame-extractor.js)
-
-Class:
-
-- `CC1101FrameExtractor`
-
-Purpose:
-
-- use `GDO0` and `GDO2` together
-- identify likely framed regions
-- print segmented frame views
-
-#### [`frame-stabilizer.js`](/home/lex/projects/node-cc1101/cc1101/analysis/frame-stabilizer.js)
-
-Class:
-
-- `CC1101FrameStabilizer`
-
-Purpose:
-
-- choose the best frame per trigger
-- compare against recent frames
-- build stabilized consensus output
-
-#### [`manual-slicer.js`](/home/lex/projects/node-cc1101/cc1101/analysis/manual-slicer.js)
-
-Class:
-
-- `CC1101ManualSlicer`
-
-Purpose:
-
-- inspect full trigger windows
-- show indexed/smoothed quantized data
-- support manual frame slicing work
-
-### Burst matching/canonicalization modules
+- split a recorded edge stream by silence gaps
+- cluster repeating patterns
+- derive a stable frame candidate
+- export a replay-ready `*.stable-frame.json`
 
 #### [`burst-analysis.js`](/home/lex/projects/node-cc1101/cc1101/analysis/burst-analysis.js)
 
@@ -823,30 +693,6 @@ Pure helpers:
 - `repeatedCore`
 - `extractSharedWindow`
 - `buildCanonicalFrame`
-
-Use this for raw burst normalization and token-based comparison.
-
-#### [`burst-matcher.js`](/home/lex/projects/node-cc1101/cc1101/analysis/burst-matcher.js)
-
-Class:
-
-- `CC1101BurstMatcher`
-
-Purpose:
-
-- collect bursts directly by silence gap
-- normalize and compare them to recent bursts
-
-#### [`canonical-frame.js`](/home/lex/projects/node-cc1101/cc1101/analysis/canonical-frame.js)
-
-Class:
-
-- `CC1101CanonicalFrameBuilder`
-
-Purpose:
-
-- compare repeated similar bursts
-- derive a canonical frame from multiple captures
 
 ## Common usage patterns
 
@@ -870,43 +716,34 @@ const packet = await radio.readFifoPacket();
 console.log(packet);
 ```
 
-### Direct async analysis runtime
+### Record, analyze, and replay
 
 ```js
-const { CC1101SignalDetector } = require("./cc1101/analysis/signal-detector");
-
-const detector = new CC1101SignalDetector({
-  gdo0: 24,
-  threshold: 100,
-  onMessage: console.log,
-});
-
-await detector.start();
-```
-
-### Capture and replay
-
-```js
-const { CC1101WindowCapture } = require("./cc1101/analysis/window-capture");
+const { loadCaptureFile } = require("./cc1101/analysis/capture-file");
+const { CC1101StreamRecorder } = require("./cc1101/analysis/stream-recorder");
 const {
-  loadCaptureFile,
-} = require("./cc1101/analysis/capture-file");
+  analyzeRecordedStream,
+  buildStableFramePath,
+} = require("./cc1101/analysis/stream-analysis");
 const {
   buildReplayFromCapture,
   CC1101WindowReplayer,
 } = require("./cc1101/analysis/window-replay");
 
-const capture = new CC1101WindowCapture({
-  gdo0: 24,
-  threshold: 100,
-  baseUs: 400,
-  outDir: "/tmp/rf-captures",
+const recorder = new CC1101StreamRecorder({
+  rxDataGpio: 24,
+  filepath: "/tmp/rf-captures/session-001.json",
 });
 
-await capture.start();
+await recorder.start();
+await recorder.stop();
 
-const saved = loadCaptureFile("/tmp/rf-captures/capture-001.json");
-const replay = buildReplayFromCapture(saved, { mode: "normalized", baseUs: 400 });
+const saved = loadCaptureFile("/tmp/rf-captures/session-001.json");
+const analysis = analyzeRecordedStream(saved, {
+  exportPath: buildStableFramePath("/tmp/rf-captures/session-001.json"),
+});
+const stable = loadCaptureFile(analysis.exportPath);
+const replay = buildReplayFromCapture(stable, { mode: "normalized", baseUs: 400 });
 
 const replayer = new CC1101WindowReplayer({
   gpio: 24,

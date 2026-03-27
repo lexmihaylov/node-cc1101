@@ -5,7 +5,7 @@ Node.js CC1101 library and Raspberry Pi RF toolkit for 433/868/915 MHz over SPI 
 This project has two parts:
 
 - A reusable CC1101 driver and radio configuration library under [`cc1101/`](/home/lex/projects/node-cc1101/cc1101)
-- An interactive shell in [`radio-shell.js`](/home/lex/projects/node-cc1101/radio-shell.js) for listening, analyzing, capturing, and replaying signals
+- An interactive shell in [`radio-shell.js`](/home/lex/projects/node-cc1101/radio-shell.js) for listening, recording, decoding, and replaying signals
 
 ## Features
 
@@ -13,7 +13,7 @@ This project has two parts:
 - High-level radio configuration with `configureRadio(...)`
 - Packet mode helpers for RX/TX
 - Direct async mode helpers for raw OOK work
-- Signal analysis modules for protocol detection, consensus, burst matching, frame extraction, slicing, and capture/replay
+- Stream-first analysis modules for recording, clustering repeating patterns, decoding likely protocols, and replay
 - Interactive shell for RF exploration on Raspberry Pi
 - JSDoc types throughout the library for editor completion and TypeScript inference
 
@@ -163,59 +163,57 @@ node radio-shell.js
 Examples:
 
 ```text
-cc1101> config set packet 433 ook
-cc1101> listen start 20
-cc1101> tx aa 55 01
+cc1101> mode packet 433 ook
+cc1101> listen 20
+cc1101> send aa 55 01
 
-cc1101> config set direct_async 433 ook
-cc1101> live view 24 25 100 3000
-cc1101> protocol detect 24 100 375 6
-cc1101> raw listen 24 100 220 6
-cc1101> segment collect 24 100 400 500 6
-cc1101> consensus start 24 100 400 1000 1000 6
-cc1101> capture save 24 100 400 1000 1000 /tmp/rf-captures 6
-cc1101> capture replay /tmp/rf-captures/capture-001.json 24 normalized 10 400
+cc1101> mode direct_async 433 ook
+cc1101> record /tmp/rf-captures/session-001.json 24 400 80
+cc1101> stop
+cc1101> analyze stream /tmp/rf-captures/session-001.json 400 18 8 1
+cc1101> decode ev1527_like /tmp/rf-captures/session-001.stable-frame.json
+cc1101> replay /tmp/rf-captures/session-001.stable-frame.json 24 normalized 10 400
 ```
 
-Capture/replay wiring:
+Direct async wiring model:
 
-- Capture: `CC1101 async-data GDO output -> Raspberry Pi input GPIO`
-- Replay: `Raspberry Pi output GPIO -> CC1101 async TX data input`
+- RX/listen/record: `CC1101 GDO0 async-data output -> Raspberry Pi input GPIO`
+- TX/replay: `Raspberry Pi output GPIO -> CC1101 GDO0 async TX data input`
 
 ### Main shell commands
 
 - `connect [bus] [device] [speedHz]`
 - `disconnect`
-- `reset`
-- `info`
+- `man [command]`
 - `status`
-- `config show`
-- `config set <packet|direct_async> [band] [modulation]`
-- `gpio set [gdo0] [gdo2] [gdo1]`
-- `listen start [pollMs]`
-- `listen stop`
-- `live view [gdo0] [gdo2] [threshold] [windowMs]`
-- `raw listen [gpio] [threshold] [captureMs] [rssiTolerance]`
-- `signal detect [gdo0] [threshold] [lookbackMs] [settleMs] [rssiTolerance]`
-- `timing fixed [gdo0] [threshold] [baseUs] [lookbackMs] [rssiTolerance]`
-- `segment collect [gdo0] [threshold] [baseUs] [lookbackMs] [rssiTolerance]`
-- `burst match [gpio] [silenceGapUs] [minEdges] [baseUnitUs]`
-- `canonical build [gpio] [silenceGapUs] [minEdges] [baseUnitUs]`
-- `stabilize frame [gdo0] [threshold] [baseUs] [lookbackMs] [rssiTolerance]`
-- `consensus start [gdo0] [threshold] [baseUs] [beforeMs] [afterMs] [rssiTolerance]`
-- `slice inspect [gdo0] [threshold] [baseUs] [beforeMs] [afterMs] [rssiTolerance]`
-- `frame extract [gdo0] [gdo2] [threshold] [silenceGapUs] [minEdges] [rssiTolerance]`
-- `capture save [rxDataGpio] [threshold] [baseUs] [beforeMs] [afterMs] [outDir] [rssiTolerance]`
-- `capture show <file>`
-- `capture replay <file> [txDataGpio] [mode] [repeats] [baseUs]`
-- `protocol detect [gdo0] [threshold] [baseUs] [rssiTolerance]`
-- `protocol listen [name] [gdo0] [threshold] [baseUs] [tolerance] [rssiTolerance]`
-- `protocol stop`
-- `rssi [count] [intervalMs]`
-- `tx <hex-bytes...>`
+- `mode [packet|direct_async] [band] [modulation]`
+- `listen [pollMs|gpio] [threshold] [captureMs] [rssiTolerance]`
+- `send <hex-bytes...>`
+- `send <file> [txDataGpio] [timing] [repeats] [baseUs]`
+- `record <file> [rxDataGpio] [baseUs] [minDtUs]`
+- `analyze stream <file> [baseUs] [silenceUnits] [minBurstEdges] [tolerance]`
+- `decode <protocol> <file> [baseUs] [silenceUnits] [minBurstEdges] [tolerance]`
+- `replay <file> [txDataGpio] [timing] [repeats] [baseUs]`
+- `show <file>`
+- `stop`
 - `idle`
 
+Supported decoder names currently include:
+
+- `ev1527_like`
+- `pt2262_like`
+- `generic_pwm_13`
+- `pulse_distance_like`
+
 Detailed shell documentation is available in [SHELL.md](/home/lex/projects/node-cc1101/SHELL.md).
+
+The shell also includes a built-in manual:
+
+```text
+cc1101> man
+cc1101> man listen
+cc1101> man decode
+```
 
 ## Project structure
 

@@ -2,16 +2,23 @@
 
 This document covers the interactive shell in [`radio-shell.js`](/home/lex/projects/node-cc1101/radio-shell.js).
 
-The shell is designed for Raspberry Pi based CC1101 work where you need to:
+The shell is intentionally small. It focuses on:
 
-- connect to the radio over SPI
-- switch between packet mode and direct async mode
-- inspect RSSI and chip status
-- receive and transmit packets
-- capture and replay OOK traffic
-- run protocol and timing analysis tools interactively
+- packet RX/TX
+- direct async listening
+- recording raw edge streams
+- extracting stable repeating frames from a stream
+- decoding likely protocol payloads
+- replaying a saved frame
 
-## Start the shell
+Supported decoder names currently include:
+
+- `ev1527_like`
+- `pt2262_like`
+- `generic_pwm_13`
+- `pulse_distance_like`
+
+## Start
 
 Run:
 
@@ -25,708 +32,191 @@ Or if installed as a package binary:
 cc1101-shell
 ```
 
-You should see a prompt like:
-
-```text
-cc1101>
-```
-
 The shell connects on startup using:
 
 - SPI bus `0`
 - SPI device `0`
 - SPI speed `100000`
 
-You can override those at launch:
+Override them at launch with:
 
 ```bash
 node radio-shell.js --bus 0 --device 0 --speed 100000
 ```
 
-## Shell model
+## Model
 
-The shell operates in two broad radio modes:
+The shell works in two radio modes:
 
 - `packet`
-  Used for FIFO RX/TX packet traffic.
+  FIFO RX/TX traffic.
 - `direct_async`
-  Used for GPIO-driven waveform, timing, protocol, capture, and replay tooling.
+  GPIO-driven OOK workflows: listen, record, analyze, decode, replay.
 
-Most analysis commands stop any previous runtime before starting a new one. This is intentional. The shell only runs one active GPIO/RF analysis runtime at a time.
+Only one active runtime runs at a time. Starting `listen`, `record`, or `replay` stops the previous runtime first.
 
-## Defaults
-
-Unless you override them in a command, the shell generally assumes:
+Defaults:
 
 - `band = 433`
 - `modulation = ook`
-- `packet mode` for normal RX/TX
-- `gdo0 = GPIO24`
-- `gdo2 = GPIO25`
-- `threshold = 100`
+- `GDO0 -> GPIO24`
+- `GDO2 -> GPIO25`
 
-## Command summary
+## Commands
 
 - `help`
+- `man [command]`
 - `connect [bus] [device] [speedHz]`
 - `disconnect`
-- `reset`
-- `info`
 - `status`
-- `config show`
-- `config set <packet|direct_async> [band] [modulation]`
-- `gpio set [gdo0] [gdo2] [gdo1]`
-- `listen start [pollMs]`
-- `listen stop`
-- `live view [gdo0] [gdo2] [threshold] [windowMs]`
-- `raw listen [gpio] [threshold] [captureMs] [rssiTolerance]`
-- `signal detect [gdo0] [threshold] [lookbackMs] [settleMs] [rssiTolerance]`
-- `timing fixed [gdo0] [threshold] [baseUs] [lookbackMs] [rssiTolerance]`
-- `segment collect [gdo0] [threshold] [baseUs] [lookbackMs] [rssiTolerance]`
-- `burst match [gpio] [silenceGapUs] [minEdges] [baseUnitUs]`
-- `canonical build [gpio] [silenceGapUs] [minEdges] [baseUnitUs]`
-- `stabilize frame [gdo0] [threshold] [baseUs] [lookbackMs] [rssiTolerance]`
-- `consensus start [gdo0] [threshold] [baseUs] [beforeMs] [afterMs] [rssiTolerance]`
-- `slice inspect [gdo0] [threshold] [baseUs] [beforeMs] [afterMs] [rssiTolerance]`
-- `frame extract [gdo0] [gdo2] [threshold] [silenceGapUs] [minEdges] [rssiTolerance]`
-- `capture save [rxDataGpio] [threshold] [baseUs] [beforeMs] [afterMs] [outDir] [rssiTolerance]`
-- `capture show <file>`
-- `capture replay <file> [txDataGpio] [mode] [repeats] [baseUs]`
-- `protocol detect [gdo0] [threshold] [baseUs] [rssiTolerance]`
-- `protocol listen [name] [gdo0] [threshold] [baseUs] [tolerance] [rssiTolerance]`
-
-For trigger-driven analysis commands, `rssiTolerance` is optional. When set, the first accepted trigger becomes the RSSI reference and later triggers are ignored unless they stay within `triggerRssi ± rssiTolerance`.
-- `protocol stop`
-- `rssi [count] [intervalMs]`
-- `tx <hex-bytes...>`
+- `mode [packet|direct_async] [band] [modulation]`
+- `listen [pollMs|gpio] [threshold] [captureMs] [rssiTolerance]`
+- `send <hex-bytes...>`
+- `send <file> [txDataGpio] [timing] [repeats] [baseUs]`
+- `record <file> [rxDataGpio] [baseUs] [minDtUs]`
+- `analyze stream <file> [baseUs] [silenceUnits] [minBurstEdges] [tolerance]`
+- `decode <protocol> <file> [baseUs] [silenceUnits] [minBurstEdges] [tolerance]`
+- `replay <file> [txDataGpio] [timing] [repeats] [baseUs]`
+- `show <file>`
+- `stop`
 - `idle`
+- `clear`
 - `quit`
 
-## General commands
+## Command details
 
-### `help`
+### `man [command]`
 
-Prints the shell command list and example flows.
+Shows detailed built-in shell documentation.
+
+Examples:
+
+```text
+cc1101> man
+cc1101> man listen
+cc1101> man replay
+```
+
+Without arguments it lists the available manual entries. With a command name it prints detailed usage, mode-specific behavior, and explanations for each option.
+
+### `mode [packet|direct_async] [band] [modulation]`
+
+Shows the current mode when called without arguments.
+
+Examples:
+
+```text
+cc1101> mode
+cc1101> mode packet 433 ook
+cc1101> mode direct_async 433 ook
+```
+
+### `listen [pollMs|gpio] [threshold] [captureMs] [rssiTolerance]`
+
+Mode-sensitive listen command:
+
+- in `packet` mode, starts FIFO packet RX polling
+- in `direct_async` mode, starts a raw OOK edge listener on the chosen GPIO
+
+Examples:
+
+```text
+cc1101> mode packet 433 ook
+cc1101> listen 20
+
+cc1101> mode direct_async 433 ook
+cc1101> listen 24 100 220 6
+```
+
+### `send`
+
+Mode-sensitive send command:
+
+- in `packet` mode, accepts payload bytes
+- in `direct_async` mode, accepts a replayable frame/capture file and forwards to the replay path
+
+Examples:
+
+```text
+cc1101> mode packet 433 ook
+cc1101> send aa 55 01
+
+cc1101> mode direct_async 433 ook
+cc1101> send /tmp/rf-captures/session-001.stable-frame.json 24 normalized 10 400
+```
+
+### `record <file> [rxDataGpio] [baseUs] [minDtUs]`
+
+Records a continuous direct-async edge stream to one JSON file. Use this when you want multiple clicks or presses in one recording and want to extract repeating patterns later.
 
 Example:
 
 ```text
-cc1101> help
+cc1101> mode direct_async 433 ook
+cc1101> record /tmp/rf-captures/session-001.json 24 400 80
+cc1101> stop
 ```
 
-### `connect [bus] [device] [speedHz]`
+### `analyze stream <file> [baseUs] [silenceUnits] [minBurstEdges] [tolerance]`
 
-Connects to the CC1101 over SPI. If already connected, the shell disconnects first and reconnects with the new parameters.
-
-Arguments:
-
-- `bus`: SPI bus number
-- `device`: SPI chip select number
-- `speedHz`: SPI speed in Hz
+Loads a recorded stream, splits it into bursts, clusters repeating patterns, guesses a likely protocol, and writes the best stable frame to a sidecar file ending in `.stable-frame.json`.
 
 Example:
 
 ```text
-cc1101> connect 0 0 100000
+cc1101> analyze stream /tmp/rf-captures/session-001.json 400 18 8 1
 ```
 
-### `disconnect`
+### `decode <protocol> <file> [baseUs] [silenceUnits] [minBurstEdges] [tolerance]`
 
-Stops listeners/runtimes, idles the radio, and closes SPI.
+Runs a specific protocol decoder against either:
+
+- a stable frame file
+- a replayable capture file
+- a raw recorded stream, in which case the shell first extracts the best stable frame
 
 Example:
 
 ```text
-cc1101> disconnect
+cc1101> decode ev1527_like /tmp/rf-captures/session-001.stable-frame.json
 ```
 
-### `reset`
+### `replay <file> [txDataGpio] [timing] [repeats] [baseUs]`
 
-Sends `SRES` to the radio and resets runtime state in the shell.
+Replays a saved frame or capture file through the Raspberry Pi GPIO line that feeds the CC1101 async TX data input.
 
 Example:
 
 ```text
-cc1101> reset
+cc1101> replay /tmp/rf-captures/session-001.stable-frame.json 24 normalized 10 400
 ```
 
-### `info`
+### `show <file>`
 
-Prints chip information from the driver. Useful for confirming the CC1101 is responding and the SPI link is healthy.
+Prints a summary of a saved stream, frame, or capture file.
 
-Example:
+### `stop`
 
-```text
-cc1101> info
-```
-
-### `status`
-
-Prints current radio status values such as:
-
-- `MARCSTATE`
-- `RSSI raw`
-- `RSSI dBm`
-- `PKTSTATUS`
-- `RXBYTES`
-- `TXBYTES`
-
-Example:
-
-```text
-cc1101> status
-```
+Stops the active packet listener or direct-async runtime.
 
 ### `idle`
 
-Stops packet listening or active analysis runtime, then places the radio in IDLE.
+Stops active work and sends the radio to IDLE.
 
-Example:
-
-```text
-cc1101> idle
-```
-
-### `quit`
-
-Exits the shell cleanly.
-
-Example:
+## Typical workflow
 
 ```text
-cc1101> quit
+cc1101> mode direct_async 433 ook
+cc1101> record /tmp/rf-captures/session-001.json 24 400 80
+cc1101> stop
+cc1101> analyze stream /tmp/rf-captures/session-001.json 400 18 8 1
+cc1101> decode ev1527_like /tmp/rf-captures/session-001.stable-frame.json
+cc1101> replay /tmp/rf-captures/session-001.stable-frame.json 24 normalized 10 400
 ```
 
-## Radio configuration commands
+Direct async wiring model:
 
-### `config show`
+- RX/listen/record: `CC1101 GDO0 async-data output -> Raspberry Pi input GPIO`
+- TX/replay: `Raspberry Pi output GPIO -> CC1101 GDO0 async TX data input`
 
-Prints the shell's current in-memory radio configuration object.
-
-Example:
-
-```text
-cc1101> config show
-```
-
-### `config set <packet|direct_async> [band] [modulation]`
-
-Sets the current radio configuration used by other commands.
-
-Arguments:
-
-- `packet|direct_async`: radio mode
-- `band`: `433`, `868`, or `915`
-- `modulation`: `ook` or `fsk`
-
-Examples:
-
-```text
-cc1101> config set packet 433 ook
-cc1101> config set packet 433 fsk
-cc1101> config set direct_async 433 ook
-```
-
-Notes:
-
-- `direct_async` is intended for OOK workflows in this project.
-- `tx` and `listen start` currently operate on packet mode.
-
-### `gpio set [gdo0] [gdo2] [gdo1]`
-
-Updates GDO routing in the current shell config.
-
-Allowed symbolic values are:
-
-- `chip_ready_n`
-- `high_impedance`
-- `pqi`
-- `async_serial_data`
-
-Example:
-
-```text
-cc1101> gpio set async_serial_data pqi high_impedance
-```
-
-This sets:
-
-- `gdo0 = async_serial_data`
-- `gdo2 = pqi`
-- `gdo1 = high_impedance`
-
-## Packet RX/TX commands
-
-### `listen start [pollMs]`
-
-Configures the radio for packet RX using the current shell config, then continuously polls the RX FIFO.
-
-Arguments:
-
-- `pollMs`: delay between FIFO polls, default `20`
-
-Example:
-
-```text
-cc1101> config set packet 433 ook
-cc1101> listen start 20
-```
-
-Typical output:
-
-```text
-[rx] len=5 payload=[AA 55 01 02 03] status=[7F 80]
-```
-
-Notes:
-
-- This command is packet-mode only.
-- If RX overflow occurs, the driver recovers and prints an overflow message.
-
-### `listen stop`
-
-Stops packet RX polling and idles the radio.
-
-Example:
-
-```text
-cc1101> listen stop
-```
-
-### `tx <hex-bytes...>`
-
-Transmits a packet using the current packet-mode config.
-
-Arguments:
-
-- one or more hex bytes, with or without `0x`
-
-Examples:
-
-```text
-cc1101> tx aa 55 01
-cc1101> tx 0xaa 0x55 0x01 0x02
-```
-
-Notes:
-
-- This command is packet-mode only.
-- The shell parses bytes as hex.
-
-## RSSI and live visualization
-
-### `rssi [count] [intervalMs]`
-
-Samples RSSI repeatedly.
-
-Arguments:
-
-- `count`: number of samples, default `10`
-- `intervalMs`: delay between samples, default `100`
-
-Example:
-
-```text
-cc1101> rssi 20 100
-```
-
-### `live view [gdo0] [gdo2] [threshold] [windowMs]`
-
-Starts a live terminal visualization of:
-
-- `GDO0`
-- `GDO2`
-- RSSI history
-- trigger windows
-
-Arguments:
-
-- `gdo0`: GPIO pin for GDO0, default `24`
-- `gdo2`: GPIO pin for GDO2, default `25`
-- `threshold`: RSSI trigger threshold, default `100`
-- `windowMs`: time window shown in the UI, default `3000`
-
-Example:
-
-```text
-cc1101> live view 24 25 100 3000
-```
-
-Notes:
-
-- This is a continuously updating screen-oriented command.
-- Stop it with `Ctrl+C`, `disconnect`, `idle`, `protocol stop`, or by starting another runtime.
-
-## Direct async raw capture and signal inspection
-
-### `raw listen [gpio] [threshold] [captureMs] [rssiTolerance]`
-
-Arms a raw trigger listener. When RSSI crosses the threshold, the shell captures a short burst of edges and prints a summarized view.
-
-Arguments:
-
-- `gpio`: GPIO pin carrying async serial data, default `24`
-- `threshold`: RSSI trigger threshold, default `100`
-- `captureMs`: capture window length in milliseconds, default `220`
-
-Example:
-
-```text
-cc1101> raw listen 24 100 220 6
-```
-
-### `signal detect [gdo0] [threshold] [lookbackMs] [settleMs] [rssiTolerance]`
-
-Detects candidate frames from a triggered RSSI event and estimates likely timing clusters automatically.
-
-Arguments:
-
-- `gdo0`: GPIO pin, default `24`
-- `threshold`: RSSI trigger threshold, default `100`
-- `lookbackMs`: how much edge history to include before the trigger, default `1000`
-- `settleMs`: time to wait after trigger before analyzing, default `220`
-
-Example:
-
-```text
-cc1101> signal detect 24 100 1000 220 6
-```
-
-Use this when you do not yet know the base timing.
-
-### `timing fixed [gdo0] [threshold] [baseUs] [lookbackMs] [rssiTolerance]`
-
-Like `signal detect`, but quantizes using a fixed base timing instead of estimating one.
-
-Arguments:
-
-- `gdo0`: GPIO pin, default `24`
-- `threshold`: RSSI trigger threshold, default `100`
-- `baseUs`: fixed unit in microseconds, default `500`
-- `lookbackMs`: edge history window before the trigger, default `1000`
-
-Example:
-
-```text
-cc1101> timing fixed 24 100 500 1000 6
-```
-
-Use this when you already know the protocol timing.
-
-### `segment collect [gdo0] [threshold] [baseUs] [lookbackMs] [rssiTolerance]`
-
-Collects triggered windows, quantizes them to units, splits them into segments, and prints recent summaries so you can compare repeated presses.
-
-Arguments:
-
-- `gdo0`: GPIO pin, default `24`
-- `threshold`: RSSI trigger threshold, default `100`
-- `baseUs`: unit size in microseconds, default `400`
-- `lookbackMs`: history before the trigger, default `500`
-
-Example:
-
-```text
-cc1101> segment collect 24 100 400 500 6
-```
-
-### `slice inspect [gdo0] [threshold] [baseUs] [beforeMs] [afterMs] [rssiTolerance]`
-
-Captures a full trigger window and prints:
-
-- indexed rows
-- raw durations
-- snapped durations
-- units
-- smoothed units
-- a manual slice view if configured in code
-
-Arguments:
-
-- `gdo0`: GPIO pin, default `24`
-- `threshold`: RSSI trigger threshold, default `100`
-- `baseUs`: quantization base, default `400`
-- `beforeMs`: window before trigger, default `1000`
-- `afterMs`: window after trigger, default `1000`
-
-Example:
-
-```text
-cc1101> slice inspect 24 100 400 1000 1000 6
-```
-
-This is useful when reverse-engineering frame boundaries manually.
-
-## Protocol commands
-
-### `protocol detect [gdo0] [threshold] [baseUs] [rssiTolerance]`
-
-Runs protocol detection against captured frames and prints ranked candidates.
-
-Arguments:
-
-- `gdo0`: GPIO pin, default `24`
-- `threshold`: RSSI trigger threshold, default `100`
-- `baseUs`: base timing in microseconds, default `375`
-
-Example:
-
-```text
-cc1101> protocol detect 24 100 375 6
-```
-
-### `protocol listen [name] [gdo0] [threshold] [baseUs] [tolerance] [rssiTolerance]`
-
-Listens for a specific decoded protocol and prints decoded payloads.
-
-Arguments:
-
-- `name`: protocol name, default `ev1527_like`
-- `gdo0`: GPIO pin, default `24`
-- `threshold`: RSSI trigger threshold, default `100`
-- `baseUs`: base timing in microseconds, default `375`
-- `tolerance`: unit tolerance, default `1`
-
-Example:
-
-```text
-cc1101> protocol listen ev1527_like 24 100 375 1 6
-```
-
-Currently supported protocol families are implemented in [`protocol-analysis.js`](/home/lex/projects/node-cc1101/cc1101/analysis/protocol-analysis.js).
-
-### `protocol stop`
-
-Stops the active protocol or analysis runtime.
-
-Example:
-
-```text
-cc1101> protocol stop
-```
-
-## Frame comparison and stabilization commands
-
-### `consensus start [gdo0] [threshold] [baseUs] [beforeMs] [afterMs] [rssiTolerance]`
-
-Builds a running consensus across recent triggered slices. Useful for repeated key presses from the same remote.
-
-Arguments:
-
-- `gdo0`: GPIO pin, default `24`
-- `threshold`: RSSI trigger threshold, default `100`
-- `baseUs`: quantization base, default `400`
-- `beforeMs`: capture before trigger, default `1000`
-- `afterMs`: capture after trigger, default `1000`
-- `rssiTolerance`: optional raw RSSI delta for consensus membership; only recent presses within `triggerRssi ± rssiTolerance` are used
-
-Example:
-
-```text
-cc1101> consensus start 24 100 400 1000 1000 6
-```
-
-### `stabilize frame [gdo0] [threshold] [baseUs] [lookbackMs] [rssiTolerance]`
-
-Selects the best candidate frame per trigger, compares it to previous best frames, and builds a consensus frame over time.
-
-Arguments:
-
-- `gdo0`: GPIO pin, default `24`
-- `threshold`: RSSI trigger threshold, default `100`
-- `baseUs`: unit size, default `500`
-- `lookbackMs`: history before trigger, default `1000`
-
-Example:
-
-```text
-cc1101> stabilize frame 24 100 500 1000 6
-```
-
-### `burst match [gpio] [silenceGapUs] [minEdges] [baseUnitUs]`
-
-Captures raw bursts directly from a GPIO input, normalizes them to units, and compares them to recent bursts.
-
-Arguments:
-
-- `gpio`: GPIO pin, default `24`
-- `silenceGapUs`: gap indicating end of burst, default `10000`
-- `minEdges`: minimum edges required, default `16`
-- `baseUnitUs`: fixed base unit, `0` means auto-estimate
-
-Example:
-
-```text
-cc1101> burst match 24 10000 16 0
-```
-
-### `canonical build [gpio] [silenceGapUs] [minEdges] [baseUnitUs]`
-
-Builds canonical frames from repeated similar bursts. This is useful when the same transmitter produces slightly noisy variations of the same symbol stream.
-
-Arguments:
-
-- `gpio`: GPIO pin, default `24`
-- `silenceGapUs`: end-of-burst gap, default `10000`
-- `minEdges`: minimum edges required, default `16`
-- `baseUnitUs`: fixed base unit, `0` means auto-estimate
-
-Example:
-
-```text
-cc1101> canonical build 24 10000 16 0
-```
-
-## Frame extraction
-
-### `frame extract [gdo0] [gdo2] [threshold] [silenceGapUs] [minEdges] [rssiTolerance]`
-
-Extracts a likely frame using:
-
-- `GDO0` async edge data
-- `GDO2` PQI hints
-- silence-before / silence-after framing
-
-Arguments:
-
-- `gdo0`: GPIO pin for async data, default `24`
-- `gdo2`: GPIO pin for PQI, default `25`
-- `threshold`: RSSI trigger threshold, default `100`
-- `silenceGapUs`: gap treated as frame boundary, default `8000`
-- `minEdges`: minimum edge count, default `12`
-
-Example:
-
-```text
-cc1101> frame extract 24 25 100 8000 12 6
-```
-
-## Capture and replay
-
-### `capture save [rxDataGpio] [threshold] [baseUs] [beforeMs] [afterMs] [outDir] [rssiTolerance]`
-
-Captures a trigger window and writes it to disk as a JSON capture file.
-
-Arguments:
-
-- `rxDataGpio`: Raspberry Pi input GPIO receiving the CC1101 async data output, default `24`
-- `threshold`: RSSI trigger threshold, default `100`
-- `baseUs`: quantization base, default `400`
-- `beforeMs`: pre-trigger capture window, default `1000`
-- `afterMs`: post-trigger capture window, default `1000`
-- `outDir`: directory for saved captures, default `/tmp/rf-captures`
-
-Example:
-
-```text
-cc1101> capture save 24 100 400 1000 1000 /tmp/rf-captures 6
-```
-
-### `capture show <file>`
-
-Reads a saved capture file and prints a summary.
-
-Example:
-
-```text
-cc1101> capture show /tmp/rf-captures/capture-001.json
-```
-
-### `capture replay <file> [txDataGpio] [mode] [repeats] [baseUs]`
-
-Loads a capture file and replays it via GPIO.
-
-Arguments:
-
-- `file`: capture JSON path
-- `txDataGpio`: Raspberry Pi output GPIO driving the CC1101 async TX data input, default `24`
-- `mode`: `normalized` or `raw`, default `normalized`
-- `repeats`: number of repeats, default `10`
-- `baseUs`: optional override base timing for normalized replay
-
-Example:
-
-```text
-cc1101> capture replay /tmp/rf-captures/capture-001.json 24 normalized 10 400
-```
-
-Notes:
-
-- Replay timing in Node.js is best-effort and subject to OS jitter.
-- Use with caution around real RF devices.
-
-Wiring model:
-
-- Capture path: `CC1101 GDO async-data output -> Raspberry Pi input GPIO (rxDataGpio)`
-- Replay path: `Raspberry Pi output GPIO (txDataGpio) -> CC1101 async TX data input`
-- These are different directions, even if you choose the same GPIO number in separate test setups.
-
-## Typical workflows
-
-### Packet RX/TX smoke test
-
-```text
-cc1101> config set packet 433 ook
-cc1101> status
-cc1101> listen start 20
-cc1101> tx aa 55 01
-```
-
-### Find timing for an unknown remote
-
-```text
-cc1101> config set direct_async 433 ook
-cc1101> signal detect 24 100 1000 220 6
-cc1101> timing fixed 24 100 375 1000 6
-cc1101> segment collect 24 100 375 500 6
-```
-
-### Build a more stable frame from repeated presses
-
-```text
-cc1101> stabilize frame 24 100 500 1000 6
-cc1101> consensus start 24 100 400 1000 1000 6
-cc1101> canonical build 24 10000 16 0
-```
-
-### Capture and replay a signal
-
-```text
-cc1101> capture save 24 100 400 1000 1000 /tmp/rf-captures 6
-cc1101> capture show /tmp/rf-captures/capture-001.json
-cc1101> capture replay /tmp/rf-captures/capture-001.json 24 normalized 10 400
-```
-
-## Troubleshooting
-
-### Shell starts but cannot connect
-
-Check:
-
-- SPI is enabled on the Pi
-- the CC1101 is powered correctly
-- bus/device numbers match your wiring
-- the process has permission to access SPI and GPIO
-
-### No signals detected
-
-Check:
-
-- antenna and frequency match the transmitter
-- `threshold` is not too low or too high
-- `gdo0` and `gdo2` pins are correct
-- you are using `direct_async` workflows for raw/OOK analysis
-
-### `tx` or `listen start` fails
-
-Those commands require packet mode.
-
-Use:
-
-```text
-cc1101> config set packet 433 ook
-```
-
-### Replay is inconsistent
-
-That can happen because timing-sensitive replay in Node.js on Linux is not hard real-time. If exact waveform timing matters, you may need a lower-level replay implementation.
+These are opposite directions on the same CC1101 data pin. Run one mode at a time.

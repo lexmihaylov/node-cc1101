@@ -1,33 +1,29 @@
 #!/usr/bin/env node
 
+const fs = require("fs");
 const readline = require("readline");
-const { CC1101ProtocolDetector } = require("./cc1101/analysis/protocol-detector");
-const { CC1101ProtocolListener } = require("./cc1101/analysis/protocol-listener");
 const { CC1101RawListener } = require("./cc1101/analysis/raw-listener");
-const { CC1101FrameExtractor } = require("./cc1101/analysis/frame-extractor");
-const { CC1101WindowCapture } = require("./cc1101/analysis/window-capture");
-const { CC1101SignalDetector } = require("./cc1101/analysis/signal-detector");
-const { CC1101SegmentCollector } = require("./cc1101/analysis/segment-collector");
-const { CC1101WindowConsensus } = require("./cc1101/analysis/window-consensus");
-const { CC1101LiveVisualizer } = require("./cc1101/analysis/live-visualizer");
-const { CC1101BurstMatcher } = require("./cc1101/analysis/burst-matcher");
-const { CC1101CanonicalFrameBuilder } = require("./cc1101/analysis/canonical-frame");
-const { CC1101FixedTimingDetector } = require("./cc1101/analysis/fixed-timing-detector");
-const { CC1101FrameStabilizer } = require("./cc1101/analysis/frame-stabilizer");
-const { CC1101ManualSlicer } = require("./cc1101/analysis/manual-slicer");
+const { CC1101StreamRecorder } = require("./cc1101/analysis/stream-recorder");
 const {
-  loadCaptureFile: loadSavedCaptureFile,
+  analyzeRecordedStream,
+  buildStableFramePath,
+} = require("./cc1101/analysis/stream-analysis");
+const {
+  loadCaptureFile,
   summarizeCaptureFile,
 } = require("./cc1101/analysis/capture-file");
 const {
   buildReplayFromCapture,
   CC1101WindowReplayer,
 } = require("./cc1101/analysis/window-replay");
+const {
+  decodeByProtocol,
+  quantizeEdges,
+} = require("./cc1101/analysis/protocol-analysis");
 const { CC1101Driver } = require("./cc1101/driver");
 const { STATUS } = require("./cc1101/constants");
 const {
   BAND,
-  GDO_SIGNAL,
   MODULATION,
   PACKET_LENGTH_MODE,
   RADIO_MODE,
@@ -51,6 +47,312 @@ const COLOR = {
   green: "\u001b[32m",
   yellow: "\u001b[33m",
   magenta: "\u001b[35m",
+};
+
+const MANUALS = {
+  help: [
+    "NAME",
+    "  help - show the short command list",
+    "",
+    "USAGE",
+    "  help",
+    "",
+    "DESCRIPTION",
+    "  Prints the compact command summary and a few example flows.",
+    "  Use `man <command>` for detailed usage of a specific command.",
+  ].join("\n"),
+  man: [
+    "NAME",
+    "  man - show detailed shell command documentation",
+    "",
+    "USAGE",
+    "  man",
+    "  man <command>",
+    "",
+    "DESCRIPTION",
+    "  Without arguments, lists the commands that have manual entries.",
+    "  With a command name, prints detailed usage, behavior, and option meanings.",
+    "",
+    "EXAMPLES",
+    "  man mode",
+    "  man listen",
+    "  man decode",
+  ].join("\n"),
+  connect: [
+    "NAME",
+    "  connect - open the SPI connection to the CC1101",
+    "",
+    "USAGE",
+    "  connect [bus] [device] [speedHz]",
+    "",
+    "OPTIONS",
+    "  bus",
+    "    SPI bus number. Default is the current shell bus, usually 0.",
+    "  device",
+    "    SPI chip-select number. Default is the current shell device, usually 0.",
+    "  speedHz",
+    "    SPI clock speed in Hz. Default is the current shell speed, usually 100000.",
+    "",
+    "DESCRIPTION",
+    "  Reconnects the shell to the radio using the supplied SPI settings.",
+    "  If the shell is already connected, it stops active work, closes the old connection,",
+    "  and then opens a new one.",
+  ].join("\n"),
+  disconnect: [
+    "NAME",
+    "  disconnect - stop active work and close the SPI connection",
+    "",
+    "USAGE",
+    "  disconnect",
+    "",
+    "DESCRIPTION",
+    "  Stops packet listening or any direct-async runtime, idles the radio,",
+    "  and closes the SPI device.",
+  ].join("\n"),
+  status: [
+    "NAME",
+    "  status - print current radio state and status registers",
+    "",
+    "USAGE",
+    "  status",
+    "",
+    "DESCRIPTION",
+    "  Prints MARCSTATE, RSSI, PKTSTATUS, RXBYTES, and TXBYTES.",
+    "  Useful for confirming whether the radio is in IDLE, RX, or TX and whether",
+    "  FIFO activity looks sane.",
+  ].join("\n"),
+  mode: [
+    "NAME",
+    "  mode - show or update the shell radio mode configuration",
+    "",
+    "USAGE",
+    "  mode",
+    "  mode [packet|direct_async] [band] [modulation]",
+    "",
+    "OPTIONS",
+    "  packet|direct_async",
+    "    Selects the operating workflow.",
+    "    `packet` is FIFO RX/TX.",
+    "    `direct_async` is GPIO-based OOK listen/record/decode/replay.",
+    "  band",
+    "    RF band preset. Supported values: 433, 868, 915.",
+    "  modulation",
+    "    Radio modulation. Supported values: ook, fsk.",
+    "    In practice, direct_async is intended for ook.",
+    "",
+    "DESCRIPTION",
+    "  With no arguments, prints the current in-memory shell configuration.",
+    "  With arguments, updates the shell defaults used by listen/send/replay.",
+  ].join("\n"),
+  listen: [
+    "NAME",
+    "  listen - receive traffic using the current shell mode",
+    "",
+    "USAGE",
+    "  listen [pollMs]",
+    "  listen [gpio] [threshold] [captureMs] [rssiTolerance]",
+    "",
+    "MODE BEHAVIOR",
+    "  packet mode",
+    "    listen [pollMs]",
+    "    Starts FIFO packet receive polling.",
+    "  direct_async mode",
+    "    listen [gpio] [threshold] [captureMs] [rssiTolerance]",
+    "    Starts a raw OOK listener that triggers on RSSI and prints captured edge windows.",
+    "",
+    "OPTIONS",
+    "  pollMs",
+    "    Packet mode only. Delay between FIFO polling passes. Default 20 ms.",
+    "  gpio",
+    "    Direct-async mode only. Raspberry Pi GPIO connected to CC1101 GDO0. Default 24.",
+    "  threshold",
+    "    Direct-async mode only. RSSI raw threshold used to arm a capture. Default 100.",
+    "  captureMs",
+    "    Direct-async mode only. Capture window length after trigger. Default 220 ms.",
+    "  rssiTolerance",
+    "    Direct-async mode only. Optional RSSI filter. After the first accepted trigger,",
+    "    later triggers are ignored unless their RSSI stays within triggerRssi +/- tolerance.",
+    "",
+    "DESCRIPTION",
+    "  Stops any existing runtime before starting a new listener.",
+    "  Stop it with `stop`, `idle`, `disconnect`, or Ctrl+C.",
+  ].join("\n"),
+  send: [
+    "NAME",
+    "  send - transmit packet bytes or replay a saved direct-async frame",
+    "",
+    "USAGE",
+    "  send <hex-bytes...>",
+    "  send <file> [txDataGpio] [timing] [repeats] [baseUs]",
+    "",
+    "MODE BEHAVIOR",
+    "  packet mode",
+    "    Expects one or more hex byte tokens such as `aa 55 01` or `0xaa 0x55 0x01`.",
+    "  direct_async mode",
+    "    Expects a saved replayable file and forwards to the replay path.",
+    "",
+    "OPTIONS",
+    "  file",
+    "    Path to a saved frame or capture JSON file.",
+    "  txDataGpio",
+    "    Raspberry Pi output GPIO driving the CC1101 GDO0 TX data input. Default 24.",
+    "  timing",
+    "    Replay timing mode. Supported values: normalized, raw. Default normalized.",
+    "  repeats",
+    "    Number of transmissions. Default 10.",
+    "  baseUs",
+    "    Optional base timing override used by normalized replay.",
+    "",
+    "DESCRIPTION",
+    "  Use `send` instead of separate TX verbs. In packet mode it writes FIFO data.",
+    "  In direct_async mode it replays a saved waveform-like file.",
+  ].join("\n"),
+  record: [
+    "NAME",
+    "  record - capture one continuous direct-async edge stream to a file",
+    "",
+    "USAGE",
+    "  record <file> [rxDataGpio] [baseUs] [minDtUs]",
+    "",
+    "OPTIONS",
+    "  file",
+    "    Output JSON file that receives the full recorded edge stream.",
+    "  rxDataGpio",
+    "    Raspberry Pi input GPIO connected to CC1101 GDO0. Default 24.",
+    "  baseUs",
+    "    Default timing base stored with the recording. Default 400 us.",
+    "  minDtUs",
+    "    Ignore edges shorter than this many microseconds. Default 80 us.",
+    "",
+    "DESCRIPTION",
+    "  This does not try to isolate one frame while recording.",
+    "  It stores the raw stream so later analysis can find repeated patterns across multiple clicks.",
+    "  Finish with `stop`.",
+  ].join("\n"),
+  analyze: [
+    "NAME",
+    "  analyze - offline analysis commands for recorded data",
+    "",
+    "USAGE",
+    "  analyze stream <file> [baseUs] [silenceUnits] [minBurstEdges] [tolerance]",
+    "",
+    "SUBCOMMANDS",
+    "  stream",
+    "    Analyze one recorded edge stream, split it into bursts, cluster repeating patterns,",
+    "    guess likely protocols, and export the best stable frame as *.stable-frame.json.",
+    "",
+    "OPTIONS",
+    "  file",
+    "    Recorded edge stream JSON file produced by `record`.",
+    "  baseUs",
+    "    Optional base timing override used during normalization.",
+    "  silenceUnits",
+    "    Minimum gap length, in timing units, treated as an inter-burst separator. Default 18.",
+    "  minBurstEdges",
+    "    Ignore very short bursts with fewer than this many edges. Default 8.",
+    "  tolerance",
+    "    Unit tolerance when aligning similar bursts. Default 1.",
+  ].join("\n"),
+  decode: [
+    "NAME",
+    "  decode - run a specific protocol decoder against a file",
+    "",
+    "USAGE",
+    "  decode <protocol> <file> [baseUs] [silenceUnits] [minBurstEdges] [tolerance]",
+    "",
+    "OPTIONS",
+    "  protocol",
+    "    Decoder name. Supported values: ev1527_like, pt2262_like, generic_pwm_13, pulse_distance_like.",
+    "  file",
+    "    Input file. May be a stable frame file, a replayable capture file, or a raw recorded stream.",
+    "  baseUs",
+    "    Optional base timing override.",
+    "  silenceUnits",
+    "    Only used when decoding a raw stream first. Inter-burst split threshold. Default 18.",
+    "  minBurstEdges",
+    "    Only used when decoding a raw stream first. Ignore bursts shorter than this. Default 8.",
+    "  tolerance",
+    "    Timing-unit tolerance used by the decoder. Default 1.",
+    "",
+    "DESCRIPTION",
+    "  If the input file is a raw stream, the shell first extracts the best stable frame",
+    "  and then runs the selected decoder.",
+  ].join("\n"),
+  replay: [
+    "NAME",
+    "  replay - transmit a saved frame or capture file through direct async TX",
+    "",
+    "USAGE",
+    "  replay <file> [txDataGpio] [timing] [repeats] [baseUs]",
+    "",
+    "OPTIONS",
+    "  file",
+    "    Saved frame or replayable capture JSON file.",
+    "  txDataGpio",
+    "    Raspberry Pi output GPIO driving CC1101 GDO0 in TX. Default 24.",
+    "  timing",
+    "    raw or normalized. Default normalized.",
+    "  repeats",
+    "    Number of times to transmit the sequence. Default 10.",
+    "  baseUs",
+    "    Optional normalized replay base timing override.",
+    "",
+    "DESCRIPTION",
+    "  Stops active work, puts the radio into direct async TX, and bit-bangs the chosen GPIO.",
+  ].join("\n"),
+  show: [
+    "NAME",
+    "  show - summarize a saved JSON file",
+    "",
+    "USAGE",
+    "  show <file>",
+    "",
+    "OPTIONS",
+    "  file",
+    "    Any saved stream/frame/capture JSON file.",
+    "",
+    "DESCRIPTION",
+    "  Prints a short summary including timestamp, edge count, base timing, and top-level fields.",
+  ].join("\n"),
+  stop: [
+    "NAME",
+    "  stop - stop the active listener or runtime",
+    "",
+    "USAGE",
+    "  stop",
+    "",
+    "DESCRIPTION",
+    "  Stops packet listen loops and direct-async runtimes such as listen or record.",
+    "  Does not disconnect the SPI device.",
+  ].join("\n"),
+  idle: [
+    "NAME",
+    "  idle - stop active work and send the radio to IDLE",
+    "",
+    "USAGE",
+    "  idle",
+    "",
+    "DESCRIPTION",
+    "  Equivalent to stopping the active runtime and then issuing SIDLE to the radio.",
+  ].join("\n"),
+  clear: [
+    "NAME",
+    "  clear - clear the terminal",
+    "",
+    "USAGE",
+    "  clear",
+  ].join("\n"),
+  quit: [
+    "NAME",
+    "  quit - exit the shell cleanly",
+    "",
+    "USAGE",
+    "  quit",
+    "  exit",
+    "",
+    "DESCRIPTION",
+    "  Stops active work, disconnects from the radio, and exits the process.",
+  ].join("\n"),
 };
 
 function createDefaultRadioConfig() {
@@ -109,12 +411,6 @@ function parseMode(value, fallback) {
   throw new Error(`Invalid mode: ${value}`);
 }
 
-function parseGdoSignal(value, fallback) {
-  if (!value) return fallback;
-  if (Object.values(GDO_SIGNAL).includes(value)) return value;
-  throw new Error(`Invalid GDO signal: ${value}`);
-}
-
 async function stableRead(radio, address) {
   let previous = await radio.readRegister(address);
   for (let i = 0; i < 3; i += 1) {
@@ -125,6 +421,45 @@ async function stableRead(radio, address) {
   return previous;
 }
 
+/**
+ * @param {any} capture
+ * @param {number | undefined} baseUsOverride
+ * @returns {Array<{ level: number, dtUs: number, wallclockMs: number, units?: number }>}
+ */
+function toFrameEdges(capture, baseUsOverride) {
+  if (!capture) {
+    throw new Error("missing capture data");
+  }
+
+  if (Array.isArray(capture.edges) && capture.edges.length > 0) {
+    if (capture.edges[0].units !== undefined) {
+      return capture.edges.map((edge, index) => ({
+        level: edge.level,
+        dtUs: edge.dtUs ?? edge.units * Number(baseUsOverride ?? capture.baseUs ?? 400),
+        wallclockMs: edge.wallclockMs ?? index,
+        units: edge.units,
+      }));
+    }
+
+    return capture.edges.map((edge, index) => ({
+      level: edge.level,
+      dtUs: edge.dtUs,
+      wallclockMs: edge.wallclockMs ?? index,
+    }));
+  }
+
+  if (Array.isArray(capture.levels) && Array.isArray(capture.durationsUs)) {
+    return capture.levels.map((level, index) => ({
+      level,
+      dtUs: capture.durationsUs[index],
+      wallclockMs: index,
+      units: Array.isArray(capture.units) ? capture.units[index] : undefined,
+    }));
+  }
+
+  throw new Error("unsupported capture file format");
+}
+
 class RadioShell {
   constructor(options = {}) {
     this.bus = options.bus ?? 0;
@@ -132,7 +467,7 @@ class RadioShell {
     this.speedHz = options.speedHz ?? 100000;
     this.radio = null;
     this.listening = false;
-    this.protocolRuntime = null;
+    this.runtime = null;
     this.radioConfig = createDefaultRadioConfig();
   }
 
@@ -166,8 +501,7 @@ class RadioShell {
   }
 
   async disconnect() {
-    await this.stopListening();
-    await this.stopProtocolRuntime();
+    await this.stop();
 
     if (!this.radio) return;
 
@@ -182,83 +516,84 @@ class RadioShell {
   printHelp() {
     console.log("commands:");
     console.log("  help");
+    console.log("  man [command]");
     console.log("  connect [bus] [device] [speedHz]");
     console.log("  disconnect");
-    console.log("  reset");
-    console.log("  info");
     console.log("  status");
-    console.log("  config show");
-    console.log("  config set <packet|direct_async> [band] [modulation]");
-    console.log("  gpio set [gdo0] [gdo2] [gdo1]");
-    console.log("  listen start [pollMs]");
-    console.log("  listen stop");
-    console.log("  live view [gdo0] [gdo2] [threshold] [windowMs]");
-    console.log("  raw listen [gpio] [threshold] [captureMs] [rssiTolerance]");
-    console.log("  signal detect [gdo0] [threshold] [lookbackMs] [settleMs] [rssiTolerance]");
-    console.log("  timing fixed [gdo0] [threshold] [baseUs] [lookbackMs] [rssiTolerance]");
-    console.log("  segment collect [gdo0] [threshold] [baseUs] [lookbackMs] [rssiTolerance]");
-    console.log("  burst match [gpio] [silenceGapUs] [minEdges] [baseUnitUs]");
-    console.log("  canonical build [gpio] [silenceGapUs] [minEdges] [baseUnitUs]");
-    console.log("  stabilize frame [gdo0] [threshold] [baseUs] [lookbackMs] [rssiTolerance]");
-    console.log("  consensus start [gdo0] [threshold] [baseUs] [beforeMs] [afterMs] [rssiTolerance]");
-    console.log("  slice inspect [gdo0] [threshold] [baseUs] [beforeMs] [afterMs] [rssiTolerance]");
-    console.log("  frame extract [gdo0] [gdo2] [threshold] [silenceGapUs] [minEdges] [rssiTolerance]");
-    console.log("  capture save [rxDataGpio] [threshold] [baseUs] [beforeMs] [afterMs] [outDir] [rssiTolerance]");
-    console.log("  capture show <file>");
-    console.log("  capture replay <file> [txDataGpio] [mode] [repeats] [baseUs]");
-    console.log("  window capture [rxDataGpio] [threshold] [baseUs] [beforeMs] [afterMs] [outDir] [rssiTolerance]");
-    console.log("  window replay <file> [txDataGpio] [mode] [repeats] [baseUs]");
-    console.log("  protocol detect [gdo0] [threshold] [baseUs] [rssiTolerance]");
-    console.log("  protocol listen [name] [gdo0] [threshold] [baseUs] [tolerance] [rssiTolerance]");
-    console.log("  protocol stop");
-    console.log("  rssi [count] [intervalMs]");
-    console.log("  tx <hex-bytes...>");
+    console.log("  mode [packet|direct_async] [band] [modulation]");
+    console.log("  listen [pollMs|gpio] [threshold] [captureMs] [rssiTolerance]");
+    console.log("  send <hex-bytes...>");
+    console.log("  send <file> [txDataGpio] [timing] [repeats] [baseUs]");
+    console.log("  record <file> [rxDataGpio] [baseUs] [minDtUs]");
+    console.log("  analyze stream <file> [baseUs] [silenceUnits] [minBurstEdges] [tolerance]");
+    console.log("  decode <protocol> <file> [baseUs] [silenceUnits] [minBurstEdges] [tolerance]");
+    console.log("  replay <file> [txDataGpio] [timing] [repeats] [baseUs]");
+    console.log("  show <file>");
+    console.log("  stop");
     console.log("  idle");
     console.log("  clear");
     console.log("  quit");
     console.log("");
-    console.log("example:");
-    console.log("  config set packet 433 ook");
-    console.log("  listen start 20");
-    console.log("  tx aa 55 01");
-    console.log("  config set direct_async 433 ook");
-    console.log("  gpio set async_serial_data high_impedance high_impedance");
-    console.log("  live view 24 25 100 3000");
-    console.log("  raw listen 24 100 220 6");
-    console.log("  signal detect 24 100 1000 220 6");
-    console.log("  timing fixed 24 100 500 1000 6");
-    console.log("  segment collect 24 100 400 500 6");
-    console.log("  burst match 24 10000 16 0");
-    console.log("  canonical build 24 10000 16 0");
-    console.log("  stabilize frame 24 100 500 1000 6");
-    console.log("  consensus start 24 100 400 1000 1000 6");
-    console.log("  slice inspect 24 100 400 1000 1000 6");
-    console.log("  frame extract 24 25 100 8000 12 6");
-    console.log("  capture save 24 100 400 1000 1000 /tmp/rf-captures 6");
-    console.log("  capture show /tmp/rf-captures/capture-001.json");
-    console.log("  capture replay /tmp/rf-captures/capture-001.json 24 normalized 10 400");
-    console.log("  window capture 24 100 400 1000 1000 /tmp/rf-captures 6");
-    console.log("  window replay /tmp/rf-captures/capture-001.json 24 normalized 10 400");
-    console.log("  protocol detect 24 100 375 6");
-    console.log("  protocol listen ev1527_like 24 100 375 1 6");
+    console.log("examples:");
+    console.log("  man listen");
+    console.log("  mode packet 433 ook");
+    console.log("  listen 20");
+    console.log("  send aa 55 01");
+    console.log("  mode direct_async 433 ook");
+    console.log("  listen 24 100 220 6");
+    console.log("  record /tmp/rf-captures/session-001.json 24 400 80");
+    console.log("  stop");
+    console.log("  analyze stream /tmp/rf-captures/session-001.json 400 18 8 1");
+    console.log("  decode ev1527_like /tmp/rf-captures/session-001.stable-frame.json");
+    console.log("  replay /tmp/rf-captures/session-001.stable-frame.json 24 normalized 10 400");
   }
 
-  printConfig() {
+  printManual(command) {
+    if (!command) {
+      console.log("manual entries:");
+      console.log(`  ${Object.keys(MANUALS).sort().join(", ")}`);
+      console.log("use `man <command>` for details");
+      return;
+    }
+
+    const key = String(command).toLowerCase();
+    const aliases = {
+      exit: "quit",
+      stream: "analyze",
+    };
+    const resolved = aliases[key] ?? key;
+    const manual = MANUALS[resolved];
+
+    if (!manual) {
+      console.log(`no manual entry for \`${command}\``);
+      return;
+    }
+
+    console.log(manual);
+  }
+
+  printMode() {
     console.log(JSON.stringify(this.radioConfig, null, 2));
   }
 
-  async reset() {
-    await this.ensureConnected();
-    await this.stopListening();
-    await this.stopProtocolRuntime();
-    await this.radio.reset();
-    console.log("radio reset");
-  }
+  setMode(mode, band, modulation) {
+    this.radioConfig = {
+      ...this.radioConfig,
+      mode: parseMode(mode, this.radioConfig.mode),
+      band: parseBand(band, this.radioConfig.band),
+      modulation: parseModulation(modulation, this.radioConfig.modulation),
+      packet: mode === RADIO_MODE.PACKET || (!mode && this.radioConfig.mode === RADIO_MODE.PACKET)
+        ? {
+          appendStatus: true,
+          lengthMode: PACKET_LENGTH_MODE.VARIABLE,
+        }
+        : {
+          appendStatus: false,
+        },
+    };
 
-  async printInfo() {
-    await this.ensureConnected();
-    const info = await this.radio.getChipInfo();
-    console.log(JSON.stringify(info, null, 2));
+    console.log("mode updated");
+    this.printMode();
   }
 
   async printStatus() {
@@ -278,64 +613,13 @@ class RadioShell {
     console.log(`TXBYTES  : ${txbytes & 0x7f}`);
   }
 
-  setConfig(mode, band, modulation) {
-    this.radioConfig = {
-      ...this.radioConfig,
-      mode: parseMode(mode, this.radioConfig.mode),
-      band: parseBand(band, this.radioConfig.band),
-      modulation: parseModulation(modulation, this.radioConfig.modulation),
-    };
-
-    if (this.radioConfig.mode === RADIO_MODE.PACKET) {
-      this.radioConfig.packet = {
-        appendStatus: true,
-        lengthMode: PACKET_LENGTH_MODE.VARIABLE,
-        ...this.radioConfig.packet,
-      };
-    } else {
-      this.radioConfig.packet = {
-        appendStatus: false,
-      };
-    }
-
-    console.log("config updated");
-    this.printConfig();
-  }
-
-  setGpio(gdo0, gdo2, gdo1) {
-    this.radioConfig.gpio = {
-      ...this.radioConfig.gpio,
-      gdo0: parseGdoSignal(
-        gdo0,
-        this.radioConfig.gpio.gdo0 ?? GDO_SIGNAL.ASYNC_SERIAL_DATA
-      ),
-      gdo2: parseGdoSignal(
-        gdo2,
-        this.radioConfig.gpio.gdo2 ?? GDO_SIGNAL.PQI
-      ),
-      gdo1: parseGdoSignal(
-        gdo1,
-        this.radioConfig.gpio.gdo1 ?? GDO_SIGNAL.HIGH_IMPEDANCE
-      ),
-    };
-
-    console.log("gpio routing updated");
-    this.printConfig();
-  }
-
-  async startListening(pollMs = 20) {
+  async startPacketListen(pollMs = 20) {
     await this.ensureConnected();
-    await this.stopListening();
-    await this.stopProtocolRuntime();
-
-    if (this.radioConfig.mode !== RADIO_MODE.PACKET) {
-      throw new Error("listen start currently supports packet mode only");
-    }
-
+    await this.stop();
     await this.radio.startPacketRx(this.radioConfig);
     this.listening = true;
 
-    console.log(`listening for packets pollMs=${pollMs}`);
+    console.log(`packet listen started pollMs=${pollMs}`);
 
     while (this.listening) {
       const result = await this.radio.readFifoPacket();
@@ -354,73 +638,11 @@ class RadioShell {
     }
   }
 
-  async stopListening() {
-    if (!this.listening) return;
-    this.listening = false;
-    await sleep(5);
-    if (this.radio) {
-      await this.radio.idle().catch(() => {});
-    }
-    console.log("listening stopped");
-  }
-
-  async startProtocolDetection(gdo0 = 24, threshold = 100, baseUs = 375, rssiTolerance) {
-    await this.stopListening();
-    await this.stopProtocolRuntime();
+  async startDirectAsyncListen(gpio = 24, threshold = 100, captureMs = 220, rssiTolerance) {
+    await this.stop();
     await this.disconnect();
 
-    this.protocolRuntime = new CC1101ProtocolDetector({
-      bus: this.bus,
-      device: this.device,
-      speedHz: this.speedHz,
-      gdo0: Number(gdo0),
-      threshold: Number(threshold),
-      baseUs: Number(baseUs),
-      rssiTolerance: rssiTolerance !== undefined ? Number(rssiTolerance) : null,
-      onMessage: (message) => {
-        console.log(`[protocol] ${message}`);
-      },
-    });
-
-    await this.protocolRuntime.start();
-  }
-
-  async startProtocolListen(
-    protocol = "ev1527_like",
-    gdo0 = 24,
-    threshold = 100,
-    baseUs = 375,
-    tolerance = 1,
-    rssiTolerance
-  ) {
-    await this.stopListening();
-    await this.stopProtocolRuntime();
-    await this.disconnect();
-
-    this.protocolRuntime = new CC1101ProtocolListener({
-      bus: this.bus,
-      device: this.device,
-      speedHz: this.speedHz,
-      protocol,
-      gdo0: Number(gdo0),
-      threshold: Number(threshold),
-      baseUs: Number(baseUs),
-      tolerance: Number(tolerance),
-      rssiTolerance: rssiTolerance !== undefined ? Number(rssiTolerance) : null,
-      onMessage: (message) => {
-        console.log(`[protocol] ${message}`);
-      },
-    });
-
-    await this.protocolRuntime.start();
-  }
-
-  async startRawListen(gpio = 24, threshold = 100, captureMs = 220, rssiTolerance) {
-    await this.stopListening();
-    await this.stopProtocolRuntime();
-    await this.disconnect();
-
-    this.protocolRuntime = new CC1101RawListener({
+    this.runtime = new CC1101RawListener({
       bus: this.bus,
       device: this.device,
       speedHz: this.speedHz,
@@ -429,288 +651,38 @@ class RadioShell {
       captureMs: Number(captureMs),
       rssiTolerance: rssiTolerance !== undefined ? Number(rssiTolerance) : null,
       onMessage: (message) => {
-        console.log(`[raw] ${message}`);
+        console.log(`[async] ${message}`);
       },
     });
 
-    await this.protocolRuntime.start();
+    await this.runtime.start();
   }
 
-  async startLiveView(gdo0 = 24, gdo2 = 25, threshold = 100, windowMs = 3000) {
-    await this.stopListening();
-    await this.stopProtocolRuntime();
-    await this.disconnect();
-
-    this.protocolRuntime = new CC1101LiveVisualizer({
-      bus: this.bus,
-      device: this.device,
-      speedHz: this.speedHz,
-      gdo0: Number(gdo0),
-      gdo2: Number(gdo2),
-      threshold: Number(threshold),
-      windowMs: Number(windowMs),
-      onMessage: (message) => {
-        console.log(`[live] ${message}`);
-      },
-    });
-
-    await this.protocolRuntime.start();
-  }
-
-  async startSignalDetect(gdo0 = 24, threshold = 100, lookbackMs = 1000, settleMs = 220, rssiTolerance) {
-    await this.stopListening();
-    await this.stopProtocolRuntime();
-    await this.disconnect();
-
-    this.protocolRuntime = new CC1101SignalDetector({
-      bus: this.bus,
-      device: this.device,
-      speedHz: this.speedHz,
-      gdo0: Number(gdo0),
-      threshold: Number(threshold),
-      lookbackMs: Number(lookbackMs),
-      settleMs: Number(settleMs),
-      rssiTolerance: rssiTolerance !== undefined ? Number(rssiTolerance) : null,
-      onMessage: (message) => {
-        console.log(`[signal] ${message}`);
-      },
-    });
-
-    await this.protocolRuntime.start();
-  }
-
-  async startFixedTiming(gdo0 = 24, threshold = 100, baseUs = 500, lookbackMs = 1000, rssiTolerance) {
-    await this.stopListening();
-    await this.stopProtocolRuntime();
-    await this.disconnect();
-
-    this.protocolRuntime = new CC1101FixedTimingDetector({
-      bus: this.bus,
-      device: this.device,
-      speedHz: this.speedHz,
-      gdo0: Number(gdo0),
-      threshold: Number(threshold),
-      baseUs: Number(baseUs),
-      lookbackMs: Number(lookbackMs),
-      rssiTolerance: rssiTolerance !== undefined ? Number(rssiTolerance) : null,
-      onMessage: (message) => {
-        console.log(`[timing] ${message}`);
-      },
-    });
-
-    await this.protocolRuntime.start();
-  }
-
-  async startSegmentCollect(gdo0 = 24, threshold = 100, baseUs = 400, lookbackMs = 500, rssiTolerance) {
-    await this.stopListening();
-    await this.stopProtocolRuntime();
-    await this.disconnect();
-
-    this.protocolRuntime = new CC1101SegmentCollector({
-      bus: this.bus,
-      device: this.device,
-      speedHz: this.speedHz,
-      gdo0: Number(gdo0),
-      threshold: Number(threshold),
-      baseUs: Number(baseUs),
-      lookbackMs: Number(lookbackMs),
-      rssiTolerance: rssiTolerance !== undefined ? Number(rssiTolerance) : null,
-      onMessage: (message) => {
-        console.log(`[segment] ${message}`);
-      },
-    });
-
-    await this.protocolRuntime.start();
-  }
-
-  async startBurstMatch(gpio = 24, silenceGapUs = 10000, minEdges = 16, baseUnitUs = 0) {
-    await this.stopListening();
-    await this.stopProtocolRuntime();
-    await this.disconnect();
-
-    this.protocolRuntime = new CC1101BurstMatcher({
-      bus: this.bus,
-      device: this.device,
-      speedHz: this.speedHz,
-      gpio: Number(gpio),
-      silenceGapUs: Number(silenceGapUs),
-      minEdges: Number(minEdges),
-      baseUnitUs: Number(baseUnitUs) || null,
-      onMessage: (message) => {
-        console.log(`[burst] ${message}`);
-      },
-    });
-
-    await this.protocolRuntime.start();
-  }
-
-  async startCanonicalBuild(gpio = 24, silenceGapUs = 10000, minEdges = 16, baseUnitUs = 0) {
-    await this.stopListening();
-    await this.stopProtocolRuntime();
-    await this.disconnect();
-
-    this.protocolRuntime = new CC1101CanonicalFrameBuilder({
-      bus: this.bus,
-      device: this.device,
-      speedHz: this.speedHz,
-      gpio: Number(gpio),
-      silenceGapUs: Number(silenceGapUs),
-      minEdges: Number(minEdges),
-      baseUnitUs: Number(baseUnitUs) || null,
-      onMessage: (message) => {
-        console.log(`[canon] ${message}`);
-      },
-    });
-
-    await this.protocolRuntime.start();
-  }
-
-  async startFrameStabilize(gdo0 = 24, threshold = 100, baseUs = 500, lookbackMs = 1000, rssiTolerance) {
-    await this.stopListening();
-    await this.stopProtocolRuntime();
-    await this.disconnect();
-
-    this.protocolRuntime = new CC1101FrameStabilizer({
-      bus: this.bus,
-      device: this.device,
-      speedHz: this.speedHz,
-      gdo0: Number(gdo0),
-      threshold: Number(threshold),
-      baseUs: Number(baseUs),
-      lookbackMs: Number(lookbackMs),
-      rssiTolerance: rssiTolerance !== undefined ? Number(rssiTolerance) : null,
-      onMessage: (message) => {
-        console.log(`[stabilize] ${message}`);
-      },
-    });
-
-    await this.protocolRuntime.start();
-  }
-
-  async startConsensus(
-    gdo0 = 24,
-    threshold = 100,
-    baseUs = 400,
-    beforeMs = 1000,
-    afterMs = 1000,
-    rssiTolerance
-  ) {
-    await this.stopListening();
-    await this.stopProtocolRuntime();
-    await this.disconnect();
-
-    this.protocolRuntime = new CC1101WindowConsensus({
-      bus: this.bus,
-      device: this.device,
-      speedHz: this.speedHz,
-      gdo0: Number(gdo0),
-      threshold: Number(threshold),
-      baseUs: Number(baseUs),
-      beforeMs: Number(beforeMs),
-      afterMs: Number(afterMs),
-      rssiTolerance: rssiTolerance !== undefined ? Number(rssiTolerance) : null,
-      onMessage: (message) => {
-        console.log(`[consensus] ${message}`);
-      },
-    });
-
-    await this.protocolRuntime.start();
-  }
-
-  async startSliceInspect(gdo0 = 24, threshold = 100, baseUs = 400, beforeMs = 1000, afterMs = 1000, rssiTolerance) {
-    await this.stopListening();
-    await this.stopProtocolRuntime();
-    await this.disconnect();
-
-    this.protocolRuntime = new CC1101ManualSlicer({
-      bus: this.bus,
-      device: this.device,
-      speedHz: this.speedHz,
-      gdo0: Number(gdo0),
-      threshold: Number(threshold),
-      baseUs: Number(baseUs),
-      beforeMs: Number(beforeMs),
-      afterMs: Number(afterMs),
-      rssiTolerance: rssiTolerance !== undefined ? Number(rssiTolerance) : null,
-      onMessage: (message) => {
-        console.log(`[slice] ${message}`);
-      },
-    });
-
-    await this.protocolRuntime.start();
-  }
-
-  async startFrameExtract(gdo0 = 24, gdo2 = 25, threshold = 100, silenceGapUs = 8000, minEdges = 12, rssiTolerance) {
-    await this.stopListening();
-    await this.stopProtocolRuntime();
-    await this.disconnect();
-
-    this.protocolRuntime = new CC1101FrameExtractor({
-      bus: this.bus,
-      device: this.device,
-      speedHz: this.speedHz,
-      gdo0: Number(gdo0),
-      gdo2: Number(gdo2),
-      threshold: Number(threshold),
-      silenceGapUs: Number(silenceGapUs),
-      minEdges: Number(minEdges),
-      rssiTolerance: rssiTolerance !== undefined ? Number(rssiTolerance) : null,
-      onMessage: (message) => {
-        console.log(`[frame] ${message}`);
-      },
-    });
-
-    await this.protocolRuntime.start();
-  }
-
-  async startWindowCapture(
-    rxDataGpio = 24,
-    threshold = 100,
-    baseUs = 400,
-    beforeMs = 1000,
-    afterMs = 1000,
-    outDir = "/tmp/rf-captures",
-    rssiTolerance
-  ) {
-    await this.stopListening();
-    await this.stopProtocolRuntime();
-    await this.disconnect();
-
-    this.protocolRuntime = new CC1101WindowCapture({
-      bus: this.bus,
-      device: this.device,
-      speedHz: this.speedHz,
-      rxDataGpio: Number(rxDataGpio),
-      threshold: Number(threshold),
-      baseUs: Number(baseUs),
-      beforeMs: Number(beforeMs),
-      afterMs: Number(afterMs),
-      outDir: String(outDir),
-      rssiTolerance: rssiTolerance !== undefined ? Number(rssiTolerance) : null,
-      onMessage: (message) => {
-        console.log(`[window] ${message}`);
-      },
-    });
-
-    await this.protocolRuntime.start();
-  }
-
-  async saveCapture(rxDataGpio = 24, threshold = 100, baseUs = 400, beforeMs = 1000, afterMs = 1000, outDir = "/tmp/rf-captures", rssiTolerance) {
-    await this.startWindowCapture(rxDataGpio, threshold, baseUs, beforeMs, afterMs, outDir, rssiTolerance);
-  }
-
-  async replayWindow(file, txDataGpio = 24, mode = "normalized", repeats = 10, baseUs) {
-    if (!file) {
-      throw new Error("window replay requires a capture file path");
+  async listen(arg0, arg1, arg2, arg3) {
+    if (this.radioConfig.mode === RADIO_MODE.PACKET) {
+      await this.startPacketListen(Number(arg0 ?? 20));
+      return;
     }
 
-    await this.stopListening();
-    await this.stopProtocolRuntime();
+    await this.startDirectAsyncListen(
+      Number(arg0 ?? 24),
+      Number(arg1 ?? 100),
+      Number(arg2 ?? 220),
+      arg3 !== undefined ? Number(arg3) : undefined
+    );
+  }
+
+  async replay(file, txDataGpio = 24, timing = "normalized", repeats = 10, baseUs) {
+    if (!file) {
+      throw new Error("replay requires a capture file path");
+    }
+
+    await this.stop();
     await this.disconnect();
 
-    const capture = loadSavedCaptureFile(file);
+    const capture = loadCaptureFile(file);
     const replay = buildReplayFromCapture(capture, {
-      mode: /** @type {"raw" | "normalized"} */ (mode === "raw" ? "raw" : "normalized"),
+      mode: timing === "raw" ? "raw" : "normalized",
       baseUs: baseUs !== undefined ? Number(baseUs) : undefined,
     });
 
@@ -728,68 +700,185 @@ class RadioShell {
     await replayer.replay(replay);
   }
 
-  showCapture(file) {
-    if (!file) {
-      throw new Error("capture show requires a capture file path");
+  async send(args) {
+    await this.ensureConnected();
+
+    if (!args.length) {
+      throw new Error("send requires payload bytes in packet mode or a file path in direct_async mode");
     }
 
-    const capture = loadSavedCaptureFile(file);
-    const summary = summarizeCaptureFile(capture);
+    if (this.radioConfig.mode === RADIO_MODE.PACKET) {
+      const payload = parsePayload(args.join(" "));
+      await this.radio.transmitPacket(payload, this.radioConfig);
+      console.log(`tx payload=[${hex(payload)}]`);
+      return;
+    }
+
+    const [file, txDataGpio, timing, repeats, baseUs] = args;
+    if (!fs.existsSync(String(file))) {
+      throw new Error("direct_async send requires a replayable file path");
+    }
+
+    await this.replay(file, txDataGpio ?? 24, timing ?? "normalized", repeats ?? 10, baseUs);
+  }
+
+  async record(file, rxDataGpio = 24, baseUs = 400, minDtUs = 80) {
+    if (!file) {
+      throw new Error("record requires an output file path");
+    }
+
+    await this.stop();
+    await this.disconnect();
+
+    this.runtime = new CC1101StreamRecorder({
+      bus: this.bus,
+      device: this.device,
+      speedHz: this.speedHz,
+      filepath: String(file),
+      rxDataGpio: Number(rxDataGpio),
+      baseUs: Number(baseUs),
+      minDtUs: Number(minDtUs),
+      onMessage: (message) => {
+        console.log(`[record] ${message}`);
+      },
+    });
+
+    await this.runtime.start();
+  }
+
+  analyzeStream(file, baseUs, silenceUnits = 18, minBurstEdges = 8, tolerance = 1) {
+    if (!file) {
+      throw new Error("analyze stream requires a stream file path");
+    }
+
+    const stream = loadCaptureFile(file);
+    const exportPath = buildStableFramePath(file);
+    const analysis = analyzeRecordedStream(stream, {
+      baseUs: baseUs !== undefined ? Number(baseUs) : undefined,
+      silenceUnits: Number(silenceUnits),
+      minBurstEdges: Number(minBurstEdges),
+      tolerance: Number(tolerance),
+      exportPath,
+    });
+
     console.log(JSON.stringify({
       file,
-      ...summary,
+      sourceType: analysis.sourceType,
+      edgeCount: analysis.edgeCount,
+      burstCount: analysis.burstCount,
+      timing: analysis.timing,
+      burstCandidates: analysis.bursts.slice(0, 8).map((burst) => ({
+        index: burst.index,
+        edgeCount: burst.edgeCount,
+        tokenCount: burst.tokenCount,
+        topProtocol: burst.rankings[0]?.name ?? null,
+        topScore: burst.rankings[0]?.score ?? null,
+        bars: burst.bars,
+      })),
+      clusters: analysis.clusters.slice(0, 5).map((cluster) => ({
+        index: cluster.index,
+        size: cluster.size,
+        burstIndexes: cluster.burstIndexes,
+        compact: cluster.compact,
+        bars: cluster.bars,
+        topProtocol: cluster.rankings[0]?.name ?? null,
+        topScore: cluster.rankings[0]?.score ?? null,
+        decoded: cluster.decoded,
+      })),
+      best: analysis.best ? {
+        size: analysis.best.size,
+        topProtocol: analysis.best.rankings[0]?.name ?? null,
+        topScore: analysis.best.rankings[0]?.score ?? null,
+        decoded: analysis.best.decoded,
+      } : null,
+      exportPath: analysis.exportPath,
     }, null, 2));
   }
 
-  async stopProtocolRuntime() {
-    if (!this.protocolRuntime) return;
-
-    const runtime = this.protocolRuntime;
-    this.protocolRuntime = null;
-    await runtime.stop();
-    console.log("protocol runtime stopped");
-  }
-
-  async sampleRssi(count = 10, intervalMs = 100) {
-    await this.ensureConnected();
-
-    if (this.radioConfig.mode === RADIO_MODE.DIRECT_ASYNC) {
-      await this.radio.startDirectAsyncRx(this.radioConfig);
-    } else {
-      await this.radio.startPacketRx(this.radioConfig);
+  decode(protocol, file, baseUs, silenceUnits = 18, minBurstEdges = 8, tolerance = 1) {
+    if (!protocol || !file) {
+      throw new Error("decode requires <protocol> <file>");
     }
 
-    for (let i = 0; i < Number(count); i += 1) {
-      const raw = await this.radio.getRssi();
-      console.log(
-        `[rssi ${i + 1}/${count}] raw=${raw} dbm=${decodeRssi(raw).toFixed(1)}`
+    const capture = loadCaptureFile(file);
+    let frame;
+
+    if (capture.type === "edge_stream") {
+      const analysis = analyzeRecordedStream(capture, {
+        baseUs: baseUs !== undefined ? Number(baseUs) : undefined,
+        silenceUnits: Number(silenceUnits),
+        minBurstEdges: Number(minBurstEdges),
+        tolerance: Number(tolerance),
+      });
+
+      if (!analysis.best) {
+        throw new Error("no stable frame could be extracted from stream");
+      }
+
+      const bestBaseUs = Number(baseUs ?? capture.baseUs ?? analysis.timing.baseUs);
+      frame = quantizeEdges(
+        analysis.best.frame.map((token, index) => ({
+          level: token.level,
+          dtUs: token.units * bestBaseUs,
+          wallclockMs: index,
+        })),
+        bestBaseUs,
+        false
       );
-      if (i < count - 1) {
-        await sleep(Number(intervalMs));
+    } else {
+      const frameEdges = toFrameEdges(capture, baseUs !== undefined ? Number(baseUs) : undefined);
+      const resolvedBaseUs = Number(baseUs ?? capture.baseUs ?? 400);
+      frame = frameEdges[0]?.units !== undefined
+        ? frameEdges.map((edge) => ({
+          level: edge.level,
+          dtUs: edge.dtUs,
+          wallclockMs: edge.wallclockMs,
+          snappedUs: edge.dtUs,
+          units: edge.units,
+        }))
+        : quantizeEdges(frameEdges, resolvedBaseUs, false);
+    }
+
+    const decoded = decodeByProtocol(protocol, frame, Number(tolerance));
+    console.log(JSON.stringify({
+      file,
+      protocol,
+      decoded,
+    }, null, 2));
+  }
+
+  show(file) {
+    if (!file) {
+      throw new Error("show requires a capture file path");
+    }
+
+    const capture = loadCaptureFile(file);
+    console.log(JSON.stringify({
+      file,
+      ...summarizeCaptureFile(capture),
+    }, null, 2));
+  }
+
+  async stop() {
+    if (this.listening) {
+      this.listening = false;
+      await sleep(5);
+      if (this.radio) {
+        await this.radio.idle().catch(() => {});
       }
     }
-  }
 
-  async transmit(payloadParts) {
-    await this.ensureConnected();
-
-    if (!payloadParts.length) {
-      throw new Error("tx requires at least one payload byte");
+    if (this.runtime) {
+      const runtime = this.runtime;
+      this.runtime = null;
+      await runtime.stop();
+      console.log("runtime stopped");
     }
-
-    if (this.radioConfig.mode !== RADIO_MODE.PACKET) {
-      throw new Error("tx currently supports packet mode only");
-    }
-
-    const payload = parsePayload(payloadParts.join(" "));
-    await this.radio.transmitPacket(payload, this.radioConfig);
-    console.log(`tx payload=[${hex(payload)}]`);
   }
 
   async idle() {
     await this.ensureConnected();
-    await this.stopListening();
-    await this.stopProtocolRuntime();
+    await this.stop();
     await this.radio.idle();
     console.log("radio idle");
   }
@@ -797,185 +886,46 @@ class RadioShell {
 
 async function executeCommand(shell, line, onExit) {
   const tokens = parseLine(line.trim());
-
-  if (!tokens.length) {
-    return;
-  }
+  if (!tokens.length) return;
 
   const [command, subcommand, ...rest] = tokens;
 
   if (command === "help") {
     shell.printHelp();
+  } else if (command === "man") {
+    shell.printManual(subcommand);
   } else if (command === "connect") {
     await shell.connect(subcommand, rest[0], rest[1]);
   } else if (command === "disconnect") {
     await shell.disconnect();
     console.log("disconnected");
-  } else if (command === "reset") {
-    await shell.reset();
-  } else if (command === "info") {
-    await shell.printInfo();
   } else if (command === "status") {
     await shell.printStatus();
-  } else if (command === "config" && subcommand === "show") {
-    shell.printConfig();
-  } else if (command === "config" && subcommand === "set") {
-    shell.setConfig(rest[0], rest[1], rest[2]);
-  } else if (command === "gpio" && subcommand === "set") {
-    shell.setGpio(rest[0], rest[1], rest[2]);
-  } else if (command === "listen" && subcommand === "start") {
-    void shell.startListening(Number(rest[0] ?? 20)).catch((error) => {
+  } else if (command === "mode") {
+    if (!subcommand) {
+      shell.printMode();
+    } else {
+      shell.setMode(subcommand, rest[0], rest[1]);
+    }
+  } else if (command === "listen") {
+    void shell.listen(subcommand, rest[0], rest[1], rest[2]).catch((error) => {
       console.error(`listen failed: ${error.message}`);
     });
-  } else if (command === "listen" && subcommand === "stop") {
-    await shell.stopListening();
-  } else if (command === "live" && subcommand === "view") {
-    await shell.startLiveView(
-      Number(rest[0] ?? 24),
-      Number(rest[1] ?? 25),
-      Number(rest[2] ?? 100),
-      Number(rest[3] ?? 3000)
-    );
-  } else if (command === "raw" && subcommand === "listen") {
-    await shell.startRawListen(
-      Number(rest[0] ?? 24),
-      Number(rest[1] ?? 100),
-      Number(rest[2] ?? 220),
-      rest[3] !== undefined ? Number(rest[3]) : undefined
-    );
-  } else if (command === "signal" && subcommand === "detect") {
-    await shell.startSignalDetect(
-      Number(rest[0] ?? 24),
-      Number(rest[1] ?? 100),
-      Number(rest[2] ?? 1000),
-      Number(rest[3] ?? 220),
-      rest[4] !== undefined ? Number(rest[4]) : undefined
-    );
-  } else if (command === "timing" && subcommand === "fixed") {
-    await shell.startFixedTiming(
-      Number(rest[0] ?? 24),
-      Number(rest[1] ?? 100),
-      Number(rest[2] ?? 500),
-      Number(rest[3] ?? 1000),
-      rest[4] !== undefined ? Number(rest[4]) : undefined
-    );
-  } else if (command === "segment" && subcommand === "collect") {
-    await shell.startSegmentCollect(
-      Number(rest[0] ?? 24),
-      Number(rest[1] ?? 100),
-      Number(rest[2] ?? 400),
-      Number(rest[3] ?? 500),
-      rest[4] !== undefined ? Number(rest[4]) : undefined
-    );
-  } else if (command === "burst" && subcommand === "match") {
-    await shell.startBurstMatch(
-      Number(rest[0] ?? 24),
-      Number(rest[1] ?? 10000),
-      Number(rest[2] ?? 16),
-      Number(rest[3] ?? 0)
-    );
-  } else if (command === "canonical" && subcommand === "build") {
-    await shell.startCanonicalBuild(
-      Number(rest[0] ?? 24),
-      Number(rest[1] ?? 10000),
-      Number(rest[2] ?? 16),
-      Number(rest[3] ?? 0)
-    );
-  } else if (command === "stabilize" && subcommand === "frame") {
-    await shell.startFrameStabilize(
-      Number(rest[0] ?? 24),
-      Number(rest[1] ?? 100),
-      Number(rest[2] ?? 500),
-      Number(rest[3] ?? 1000),
-      rest[4] !== undefined ? Number(rest[4]) : undefined
-    );
-  } else if (command === "consensus" && subcommand === "start") {
-    await shell.startConsensus(
-      Number(rest[0] ?? 24),
-      Number(rest[1] ?? 100),
-      Number(rest[2] ?? 400),
-      Number(rest[3] ?? 1000),
-      Number(rest[4] ?? 1000),
-      rest[5] !== undefined ? Number(rest[5]) : undefined
-    );
-  } else if (command === "slice" && subcommand === "inspect") {
-    await shell.startSliceInspect(
-      Number(rest[0] ?? 24),
-      Number(rest[1] ?? 100),
-      Number(rest[2] ?? 400),
-      Number(rest[3] ?? 1000),
-      Number(rest[4] ?? 1000),
-      rest[5] !== undefined ? Number(rest[5]) : undefined
-    );
-  } else if (command === "frame" && subcommand === "extract") {
-    await shell.startFrameExtract(
-      Number(rest[0] ?? 24),
-      Number(rest[1] ?? 25),
-      Number(rest[2] ?? 100),
-      Number(rest[3] ?? 8000),
-      Number(rest[4] ?? 12),
-      rest[5] !== undefined ? Number(rest[5]) : undefined
-    );
-  } else if (command === "capture" && subcommand === "save") {
-    await shell.saveCapture(
-      Number(rest[0] ?? 24),
-      Number(rest[1] ?? 100),
-      Number(rest[2] ?? 400),
-      Number(rest[3] ?? 1000),
-      Number(rest[4] ?? 1000),
-      rest[5] ?? "/tmp/rf-captures",
-      rest[6] !== undefined ? Number(rest[6]) : undefined
-    );
-  } else if (command === "capture" && subcommand === "show") {
-    shell.showCapture(rest[0]);
-  } else if (command === "capture" && subcommand === "replay") {
-    await shell.replayWindow(
-      rest[0],
-      Number(rest[1] ?? 24),
-      rest[2] ?? "normalized",
-      Number(rest[3] ?? 10),
-      rest[4] !== undefined ? Number(rest[4]) : undefined
-    );
-  } else if (command === "window" && subcommand === "capture") {
-    await shell.startWindowCapture(
-      Number(rest[0] ?? 24),
-      Number(rest[1] ?? 100),
-      Number(rest[2] ?? 400),
-      Number(rest[3] ?? 1000),
-      Number(rest[4] ?? 1000),
-      rest[5] ?? "/tmp/rf-captures",
-      rest[6] !== undefined ? Number(rest[6]) : undefined
-    );
-  } else if (command === "window" && subcommand === "replay") {
-    await shell.replayWindow(
-      rest[0],
-      Number(rest[1] ?? 24),
-      rest[2] ?? "normalized",
-      Number(rest[3] ?? 10),
-      rest[4] !== undefined ? Number(rest[4]) : undefined
-    );
-  } else if (command === "protocol" && subcommand === "detect") {
-    await shell.startProtocolDetection(
-      Number(rest[0] ?? 24),
-      Number(rest[1] ?? 100),
-      Number(rest[2] ?? 375),
-      rest[3] !== undefined ? Number(rest[3]) : undefined
-    );
-  } else if (command === "protocol" && subcommand === "listen") {
-    await shell.startProtocolListen(
-      rest[0] ?? "ev1527_like",
-      Number(rest[1] ?? 24),
-      Number(rest[2] ?? 100),
-      Number(rest[3] ?? 375),
-      Number(rest[4] ?? 1),
-      rest[5] !== undefined ? Number(rest[5]) : undefined
-    );
-  } else if (command === "protocol" && subcommand === "stop") {
-    await shell.stopProtocolRuntime();
-  } else if (command === "rssi") {
-    await shell.sampleRssi(Number(subcommand ?? 10), Number(rest[0] ?? 100));
-  } else if (command === "tx") {
-    await shell.transmit([subcommand, ...rest].filter(Boolean));
+  } else if (command === "send") {
+    await shell.send([subcommand, ...rest].filter(Boolean));
+  } else if (command === "record") {
+    await shell.record(subcommand, rest[0], rest[1], rest[2]);
+  } else if (command === "analyze" && subcommand === "stream") {
+    shell.analyzeStream(rest[0], rest[1], rest[2], rest[3], rest[4]);
+  } else if (command === "decode") {
+    shell.decode(subcommand, rest[0], rest[1], rest[2], rest[3], rest[4]);
+  } else if (command === "replay") {
+    await shell.replay(subcommand, rest[0], rest[1], rest[2], rest[3]);
+  } else if (command === "show") {
+    shell.show(subcommand);
+  } else if (command === "stop") {
+    await shell.stop();
+    console.log("stopped");
   } else if (command === "idle") {
     await shell.idle();
   } else if (command === "clear") {
@@ -983,13 +933,13 @@ async function executeCommand(shell, line, onExit) {
   } else if (command === "quit" || command === "exit") {
     onExit();
   } else {
-    console.log("unknown command; type `help`");
+    console.log("unknown command; type `help` or `man`");
   }
 }
 
 function createStatusText(shell) {
   const config = shell.radioConfig;
-  const runtime = shell.listening ? "packet-listen" : shell.protocolRuntime ? "analysis-runtime" : "idle";
+  const runtime = shell.listening ? "listen" : shell.runtime ? "runtime" : "idle";
   const transport = shell.radio ? "connected" : "disconnected";
 
   return [
@@ -1008,9 +958,9 @@ function colorizeStatus(shell) {
   const config = shell.radioConfig;
   const transport = shell.radio ? `${COLOR.green}connected${COLOR.reset}` : `${COLOR.yellow}disconnected${COLOR.reset}`;
   const runtime = shell.listening
-    ? `${COLOR.magenta}packet-listen${COLOR.reset}`
-    : shell.protocolRuntime
-      ? `${COLOR.magenta}analysis-runtime${COLOR.reset}`
+    ? `${COLOR.magenta}listen${COLOR.reset}`
+    : shell.runtime
+      ? `${COLOR.magenta}runtime${COLOR.reset}`
       : `${COLOR.dim}idle${COLOR.reset}`;
 
   return [
@@ -1067,9 +1017,8 @@ async function main() {
     interrupting = true;
 
     try {
-      const hadActiveRuntime = shell.listening || Boolean(shell.protocolRuntime);
-      await shell.stopListening();
-      await shell.stopProtocolRuntime();
+      const hadActiveRuntime = shell.listening || Boolean(shell.runtime);
+      await shell.stop();
 
       if (!hadActiveRuntime) {
         console.log("interrupt ignored; no active runtime");
