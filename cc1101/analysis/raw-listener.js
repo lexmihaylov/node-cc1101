@@ -126,6 +126,8 @@ class CC1101RawListener {
       this.emitFrame("silence-gap");
       this.setState("silence");
       this.setState("signal_detected");
+      this.frameBuffer.push({ level, dtUs: 0 });
+      return;
     }
 
     this.frameBuffer.push({ level, dtUs });
