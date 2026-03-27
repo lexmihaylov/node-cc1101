@@ -92,6 +92,8 @@ cc1101> man replay
 
 Shows the current mode when called without arguments.
 
+Supported band values are `315`, `433`, `868`, and `915`.
+
 Examples:
 
 ```text

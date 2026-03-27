@@ -173,6 +173,8 @@ cc1101> replay /tmp/rf-captures/session-001.json 0 10000 24 10 false
 - `stop`
 - `idle`
 
+Supported band values are `315`, `433`, `868`, and `915`.
+
 The shell includes a built-in manual:
 
 ```text

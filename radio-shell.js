@@ -130,7 +130,7 @@ const MANUALS = {
     "    `packet` is FIFO RX/TX.",
     "    `direct_async` is GPIO-based OOK listen/record/replay.",
     "  band",
-    "    RF band preset. Supported values: 433, 868, 915.",
+    "    RF band preset. Supported values: 315, 433, 868, 915.",
     "  modulation",
     "    Radio modulation. Supported values: ook, fsk.",
     "    In practice, direct_async is intended for ook.",

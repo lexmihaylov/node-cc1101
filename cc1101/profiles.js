@@ -3,7 +3,7 @@
 const { REG, VALUE } = require("./constants");
 
 /**
- * @typedef {"433" | "868" | "915"} Band
+ * @typedef {"315" | "433" | "868" | "915"} Band
  * @typedef {"ook" | "fsk"} Modulation
  * @typedef {"packet" | "direct_async"} RadioMode
  * @typedef {"chip_ready_n" | "high_impedance" | "pqi" | "async_serial_data"} GdoSignal
@@ -35,8 +35,9 @@ const { REG, VALUE } = require("./constants");
  * @property {Record<string, number>} registers
  */
 
-/** @type {{ MHZ_433: Band, MHZ_868: Band, MHZ_915: Band }} */
+/** @type {{ MHZ_315: Band, MHZ_433: Band, MHZ_868: Band, MHZ_915: Band }} */
 const BAND = {
+  MHZ_315: "315",
   MHZ_433: "433",
   MHZ_868: "868",
   MHZ_915: "915",
@@ -126,6 +127,7 @@ function getFrequencyRegisters(freqMHz) {
  */
 function getCommonPreset({ band = BAND.MHZ_433 } = {}) {
   const freqMap = {
+    [BAND.MHZ_315]: 315.0,
     [BAND.MHZ_433]: 433.92,
     [BAND.MHZ_868]: 868.3,
     [BAND.MHZ_915]: 915.0,
