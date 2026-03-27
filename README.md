@@ -259,4 +259,19 @@ Syntax check:
 npm run check
 ```
 
+## Contributing
+
+Contributions are welcome.
+
+Before opening a change:
+
+- keep the command system manifest-driven under [`commands/`](/home/lex/projects/node-cc1101/commands)
+- follow the command authoring guide in [`COMMANDS.md`](/home/lex/projects/node-cc1101/COMMANDS.md)
+- keep JSDoc type definitions in place for new or changed JavaScript files
+- run the project check before submitting:
+
+```bash
+npm run check
+```
+
 Full library API documentation is available in [API.md](/home/lex/projects/node-cc1101/API.md).

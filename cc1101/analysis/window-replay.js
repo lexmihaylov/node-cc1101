@@ -27,6 +27,10 @@ const { loadCaptureFile, segmentRawFrames } = require("./capture-file");
  * @property {(message: string) => void=} onMessage
  */
 
+/**
+ * @param {number} us
+ * @returns {void}
+ */
 function sleepUs(us) {
   const start = process.hrtime.bigint();
   const target = BigInt(us);

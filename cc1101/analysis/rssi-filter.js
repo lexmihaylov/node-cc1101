@@ -1,5 +1,11 @@
 // @ts-check
 
+/**
+ * @param {number | null} lastAcceptedTriggerRssi
+ * @param {number | null} triggerRssi
+ * @param {number | null} rssiTolerance
+ * @returns {boolean}
+ */
 function shouldAcceptTriggerRssi(lastAcceptedTriggerRssi, triggerRssi, rssiTolerance) {
   return (
     rssiTolerance === null ||
