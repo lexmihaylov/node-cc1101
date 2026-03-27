@@ -132,7 +132,7 @@ Each printed raw signal includes:
 - `timeline`: a stretched high/low bar view over time
 - `edges`: the raw `level@duration` values
 
-For rendering, a built-in short pulse glitch suppressor removes brief pulse-pairs up to `150us` when they sit next to much longer timing. The saved raw stream is not modified.
+Live `listen` output is raw and unfiltered.
 
 ### `send`
 
@@ -191,7 +191,7 @@ Arguments:
 - `invert`: invert replay polarity, default `false`
 
 For raw stream files, replay first segments the file into silence-delimited frames, then replays the selected frame with its first edge rebased to `0 us`.
-Before replay, the extracted frame is also passed through the same `150us` short pulse glitch suppressor used by `show`.
+Before replay, the extracted frame is also passed through the same `150us` minimum pulse width filter used by `show`.
 
 Example:
 
@@ -214,7 +214,7 @@ Arguments:
 
 - `silenceGapUs`: silence threshold used to split the saved stream into frames, default `10000`
 
-Extracted frames are rendered after applying the same `150us` short pulse glitch suppressor used by `listen` and `replay`.
+Extracted frames are rendered after applying the same `150us` minimum pulse width filter used by `replay`.
 
 ### `stop`
 
