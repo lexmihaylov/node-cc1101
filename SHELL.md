@@ -64,10 +64,10 @@ Defaults:
 - `mode [packet|direct_async] [band] [modulation]`
 - `listen [pollMs|gpio] [silenceGapUs] [minEdges]`
 - `send <hex-bytes...>`
-- `send <file> [txDataGpio] [repeats]`
+- `send <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats]`
 - `record <file> [rxDataGpio]`
-- `replay <file> [txDataGpio] [repeats]`
-- `show <file>`
+- `replay <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats]`
+- `show <file> [silenceGapUs] [minEdges]`
 - `stop`
 - `idle`
 - `clear`
@@ -144,7 +144,7 @@ cc1101> mode packet 433 ook
 cc1101> send aa 55 01
 
 cc1101> mode direct_async 433 ook
-cc1101> send /tmp/rf-captures/session-001.json 24 10
+cc1101> send /tmp/rf-captures/session-001.json 0 10000 24 10
 ```
 
 ### `record <file> [rxDataGpio]`
@@ -173,31 +173,41 @@ cc1101> record /tmp/rf-captures/session-001.json 24
 cc1101> stop
 ```
 
-### `replay <file> [txDataGpio] [repeats]`
+### `replay <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats]`
 
 Replays a saved raw edge file through the Raspberry Pi GPIO line that feeds the CC1101 async TX data input.
 
 Arguments:
 
 - `file`: saved raw edge JSON file
+- `frameIndex`: frame number identified from the saved stream, default `0`
+- `silenceGapUs`: silence threshold used to split the stream into frames, default `10000`
 - `txDataGpio`: Raspberry Pi output GPIO driving CC1101 `GDO0` in TX, default `24`
 - `repeats`: number of times to transmit the sequence, default `10`
+
+For raw stream files, replay first segments the file into silence-delimited frames, then replays the selected frame with its first edge rebased to `0 us`.
 
 Example:
 
 ```text
-cc1101> replay /tmp/rf-captures/session-001.json 24 10
+cc1101> replay /tmp/rf-captures/session-001.json 0 10000 24 10
 ```
 
-### `show <file>`
+### `show <file> [silenceGapUs] [minEdges]`
 
 Prints a short summary of a saved JSON file.
 
 For raw edge files, `show` also renders:
 
+- `frames`: segmentation summary using the supplied silence threshold
 - `shape`: compact per-edge duration shape
 - `timeline`: scaled high/low timing view
 - `edges`: raw `level@duration` labels
+
+Arguments:
+
+- `silenceGapUs`: silence threshold used to split the saved stream into frames, default `10000`
+- `minEdges`: ignore segmented frames shorter than this many edges, default `8`
 
 ### `stop`
 
@@ -213,8 +223,8 @@ Stops active work and sends the radio to IDLE.
 cc1101> mode direct_async 433 ook
 cc1101> record /tmp/rf-captures/session-001.json 24
 cc1101> stop
-cc1101> show /tmp/rf-captures/session-001.json
-cc1101> replay /tmp/rf-captures/session-001.json 24 10
+cc1101> show /tmp/rf-captures/session-001.json 10000 8
+cc1101> replay /tmp/rf-captures/session-001.json 0 10000 24 10
 ```
 
 Direct async wiring model:

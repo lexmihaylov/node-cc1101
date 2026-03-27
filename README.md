@@ -153,8 +153,8 @@ cc1101> send aa 55 01
 cc1101> mode direct_async 433 ook
 cc1101> record /tmp/rf-captures/session-001.json 24
 cc1101> stop
-cc1101> show /tmp/rf-captures/session-001.json
-cc1101> replay /tmp/rf-captures/session-001.json 24 10
+cc1101> show /tmp/rf-captures/session-001.json 10000 8
+cc1101> replay /tmp/rf-captures/session-001.json 0 10000 24 10
 ```
 
 ### Main shell commands
@@ -166,10 +166,10 @@ cc1101> replay /tmp/rf-captures/session-001.json 24 10
 - `mode [packet|direct_async] [band] [modulation]`
 - `listen [pollMs|gpio] [silenceGapUs] [minEdges]`
 - `send <hex-bytes...>`
-- `send <file> [txDataGpio] [repeats]`
+- `send <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats]`
 - `record <file> [rxDataGpio]`
-- `replay <file> [txDataGpio] [repeats]`
-- `show <file>`
+- `replay <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats]`
+- `show <file> [silenceGapUs] [minEdges]`
 - `stop`
 - `idle`
 
@@ -191,6 +191,8 @@ During direct-async `listen` and `show`, raw signals are also rendered with:
 
 This is display-only scaling. Stored timings remain raw microseconds.
 
+For saved raw streams, `show` uses the supplied `silenceGapUs` to split the recording into frames. `replay` uses the same silence rule and frame index, then replays that frame rebased to time zero so the leading silence before the frame is not transmitted.
+
 In direct-async `listen`, the shell uses a simple state machine:
 
 - starts in `silence`
@@ -206,7 +208,7 @@ Detailed shell documentation is available in [SHELL.md](/home/lex/projects/node-
 - [`cc1101/driver.js`](/home/lex/projects/node-cc1101/cc1101/driver.js): low-level SPI driver and high-level radio helpers
 - [`cc1101/profiles.js`](/home/lex/projects/node-cc1101/cc1101/profiles.js): presets, config validation, and config translation
 - [`cc1101/constants.js`](/home/lex/projects/node-cc1101/cc1101/constants.js): register, strobe, status, and descriptive value enums
-- [`cc1101/analysis/raw-listener.js`](/home/lex/projects/node-cc1101/cc1101/analysis/raw-listener.js): RSSI-triggered raw edge capture
+- [`cc1101/analysis/raw-listener.js`](/home/lex/projects/node-cc1101/cc1101/analysis/raw-listener.js): silence-delimited raw edge listener
 - [`cc1101/analysis/stream-recorder.js`](/home/lex/projects/node-cc1101/cc1101/analysis/stream-recorder.js): continuous raw edge recording with live preview
 - [`cc1101/analysis/window-replay.js`](/home/lex/projects/node-cc1101/cc1101/analysis/window-replay.js): raw replay through GPIO
 - [`radio-shell.js`](/home/lex/projects/node-cc1101/radio-shell.js): interactive CLI shell

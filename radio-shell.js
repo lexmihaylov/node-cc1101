@@ -7,6 +7,7 @@ const { CC1101StreamRecorder } = require("./cc1101/analysis/stream-recorder");
 const {
   loadCaptureFile,
   renderRawSignal,
+  renderSegmentedFrames,
   summarizeCaptureFile,
 } = require("./cc1101/analysis/capture-file");
 const {
@@ -178,7 +179,7 @@ const MANUALS = {
     "",
     "USAGE",
     "  send <hex-bytes...>",
-    "  send <file> [txDataGpio] [repeats]",
+    "  send <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats]",
     "",
     "MODE BEHAVIOR",
     "  packet mode",
@@ -189,6 +190,10 @@ const MANUALS = {
     "OPTIONS",
     "  file",
     "    Path to a saved raw stream or raw replay JSON file.",
+    "  frameIndex",
+    "    For raw stream files, replay this identified frame. Default 0.",
+    "  silenceGapUs",
+    "    For raw stream files, split frames using this silence threshold. Default 10000 us.",
     "  txDataGpio",
     "    Raspberry Pi output GPIO driving the CC1101 GDO0 TX data input. Default 24.",
     "  repeats",
@@ -224,35 +229,45 @@ const MANUALS = {
     "  replay - transmit a saved raw edge file through direct async TX",
     "",
     "USAGE",
-    "  replay <file> [txDataGpio] [repeats]",
+    "  replay <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats]",
     "",
     "OPTIONS",
     "  file",
     "    Saved raw stream or replayable raw edge JSON file.",
+    "  frameIndex",
+    "    For raw stream files, replay this identified frame. Default 0.",
+    "  silenceGapUs",
+    "    For raw stream files, split frames using this silence threshold. Default 10000 us.",
     "  txDataGpio",
     "    Raspberry Pi output GPIO driving CC1101 GDO0 in TX. Default 24.",
     "  repeats",
     "    Number of times to transmit the sequence. Default 10.",
     "",
     "DESCRIPTION",
-    "  Stops active work, puts the radio into direct async TX, and replays the recorded",
-    "  raw edge durations exactly as stored in the file.",
+    "  Stops active work, puts the radio into direct async TX, segments the file into frames",
+    "  using the supplied silence threshold, and replays the selected frame as recorded edge events",
+    "  rebased to the start of that frame.",
   ].join("\n"),
   show: [
     "NAME",
     "  show - summarize a saved JSON file",
     "",
     "USAGE",
-    "  show <file>",
+    "  show <file> [silenceGapUs] [minEdges]",
     "",
     "OPTIONS",
     "  file",
     "    Any saved stream/frame/capture JSON file.",
+    "  silenceGapUs",
+    "    For raw stream files, split frames using this silence threshold. Default 10000 us.",
+    "  minEdges",
+    "    Ignore segmented frames shorter than this many edges. Default 8.",
     "",
     "DESCRIPTION",
     "  Prints a short summary including timestamp, edge count, and top-level fields.",
-    "  For raw edge files, it also renders a compact shape row and a scaled high/low timeline",
-    "  so similar captures can be compared visually without changing the stored timings.",
+    "  For raw edge files, it also segments the stream into silence-delimited frames and renders",
+    "  each frame with a compact shape row and a scaled high/low timeline so similar captures",
+    "  can be compared visually without changing the stored timings.",
   ].join("\n"),
   stop: [
     "NAME",
@@ -424,10 +439,10 @@ class RadioShell {
     console.log("  mode [packet|direct_async] [band] [modulation]");
     console.log("  listen [pollMs|gpio] [silenceGapUs] [minEdges]");
     console.log("  send <hex-bytes...>");
-    console.log("  send <file> [txDataGpio] [repeats]");
+    console.log("  send <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats]");
     console.log("  record <file> [rxDataGpio]");
-    console.log("  replay <file> [txDataGpio] [repeats]");
-    console.log("  show <file>");
+    console.log("  replay <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats]");
+    console.log("  show <file> [silenceGapUs] [minEdges]");
     console.log("  stop");
     console.log("  idle");
     console.log("  clear");
@@ -442,8 +457,8 @@ class RadioShell {
     console.log("  listen 24 10000 8");
     console.log("  record /tmp/rf-captures/session-001.json 24");
     console.log("  stop");
-    console.log("  show /tmp/rf-captures/session-001.json");
-    console.log("  replay /tmp/rf-captures/session-001.json 24 10");
+    console.log("  show /tmp/rf-captures/session-001.json 10000 8");
+    console.log("  replay /tmp/rf-captures/session-001.json 0 10000 24 10");
   }
 
   printManual(command) {
@@ -567,7 +582,7 @@ class RadioShell {
     );
   }
 
-  async replay(file, txDataGpio = 24, repeats = 10) {
+  async replay(file, frameIndex = 0, silenceGapUs = 10000, txDataGpio = 24, repeats = 10) {
     if (!file) {
       throw new Error("replay requires a capture file path");
     }
@@ -576,7 +591,10 @@ class RadioShell {
     await this.disconnect();
 
     const capture = loadCaptureFile(file);
-    const replay = buildReplayFromCapture(capture);
+    const replay = buildReplayFromCapture(capture, {
+      frameIndex: Number(frameIndex),
+      silenceGapUs: Number(silenceGapUs),
+    });
 
     const replayer = new CC1101WindowReplayer({
       bus: this.bus,
@@ -606,12 +624,12 @@ class RadioShell {
       return;
     }
 
-    const [file, txDataGpio, repeats] = args;
+    const [file, frameIndex, silenceGapUs, txDataGpio, repeats] = args;
     if (!fs.existsSync(String(file))) {
       throw new Error("direct_async send requires a replayable file path");
     }
 
-    await this.replay(file, txDataGpio ?? 24, repeats ?? 10);
+    await this.replay(file, frameIndex ?? 0, silenceGapUs ?? 10000, txDataGpio ?? 24, repeats ?? 10);
   }
 
   async record(file, rxDataGpio = 24) {
@@ -651,7 +669,7 @@ class RadioShell {
     await this.runtime.start();
   }
 
-  show(file) {
+  show(file, silenceGapUs = 10000, minEdges = 8) {
     if (!file) {
       throw new Error("show requires a capture file path");
     }
@@ -661,6 +679,17 @@ class RadioShell {
       file,
       ...summarizeCaptureFile(capture),
     }, null, 2));
+
+    const segmented = renderSegmentedFrames(capture, {
+      silenceGapUs: Number(silenceGapUs),
+      minEdges: Number(minEdges),
+    });
+    if (segmented) {
+      console.log("");
+      console.log(segmented);
+      return;
+    }
+
     const rendered = renderRawSignal(capture);
     if (rendered) {
       console.log("");
@@ -727,7 +756,7 @@ async function executeCommand(shell, line, onExit) {
   } else if (command === "replay") {
     await shell.replay(subcommand, rest[0], rest[1], rest[2], rest[3]);
   } else if (command === "show") {
-    shell.show(subcommand);
+    shell.show(subcommand, rest[0], rest[1]);
   } else if (command === "stop") {
     await shell.stop();
     console.log("stopped");

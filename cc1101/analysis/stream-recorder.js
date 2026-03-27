@@ -154,6 +154,12 @@ class CC1101StreamRecorder {
 
     if (this.lastTick === 0) {
       this.lastTick = tick;
+      this.edges.push({
+        idx: this.edges.length,
+        level,
+        dtUs: 0,
+        wallclockMs: Date.now(),
+      });
       return;
     }
 

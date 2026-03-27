@@ -90,7 +90,7 @@ Class:
 
 Purpose:
 
-- RSSI-triggered raw edge capture from one GPIO
+- silence-delimited raw edge capture from one GPIO
 - no normalization or protocol decoding
 - raw durations and levels only
 

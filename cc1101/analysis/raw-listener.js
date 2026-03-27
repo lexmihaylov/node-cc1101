@@ -115,6 +115,7 @@ class CC1101RawListener {
       this.lastTick = tick;
       this.lastEdgeAtUs = nowUs;
       this.setState("signal_detected");
+      this.frameBuffer.push({ level, dtUs: 0 });
       return;
     }
 

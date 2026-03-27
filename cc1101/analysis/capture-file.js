@@ -12,6 +12,21 @@ const path = require("path");
  * @property {string[]} fields
  */
 
+/**
+ * @typedef {object} RawSignal
+ * @property {number[]} levels
+ * @property {number[]} durationsUs
+ *
+ * @typedef {object} SegmentedFrame
+ * @property {number} index
+ * @property {number} startEdgeIndex
+ * @property {number} endEdgeIndex
+ * @property {number} edges
+ * @property {number} totalUs
+ * @property {number[]} levels
+ * @property {number[]} durationsUs
+ */
+
 const SPARK_BARS = "▁▂▃▄▅▆▇█";
 
 /**
@@ -38,7 +53,7 @@ function chooseScaleUnitUs(durationsUs, targetWidth = 72) {
 
 /**
  * @param {any} capture
- * @returns {{ levels: number[], durationsUs: number[] } | null}
+ * @returns {RawSignal | null}
  */
 function extractRawSignal(capture) {
   if (Array.isArray(capture?.durationsUs) && Array.isArray(capture?.levels)) {
@@ -56,6 +71,73 @@ function extractRawSignal(capture) {
   }
 
   return null;
+}
+
+/**
+ * @param {any} capture
+ * @param {number} silenceGapUs
+ * @param {number} minEdges
+ * @returns {SegmentedFrame[]}
+ */
+function segmentRawFrames(capture, silenceGapUs, minEdges = 1) {
+  const signal = extractRawSignal(capture);
+  if (!signal) return [];
+
+  const levels = signal.levels;
+  const durationsUs = signal.durationsUs;
+  if (!levels.length || levels.length !== durationsUs.length) return [];
+
+  const frames = [];
+  /** @type {{ startEdgeIndex: number, levels: number[], durationsUs: number[] } | null} */
+  let current = null;
+
+  const pushCurrent = () => {
+    if (!current || current.levels.length < minEdges) {
+      current = null;
+      return;
+    }
+
+    frames.push({
+      index: frames.length,
+      startEdgeIndex: current.startEdgeIndex,
+      endEdgeIndex: current.startEdgeIndex + current.levels.length - 1,
+      edges: current.levels.length,
+      totalUs: current.durationsUs.reduce((sum, value) => sum + value, 0),
+      levels: current.levels.slice(),
+      durationsUs: current.durationsUs.slice(),
+    });
+    current = null;
+  };
+
+  for (let i = 0; i < levels.length; i += 1) {
+    const level = levels[i];
+    const dtUs = durationsUs[i];
+
+    if (!current) {
+      current = {
+        startEdgeIndex: i,
+        levels: [level],
+        durationsUs: [0],
+      };
+      continue;
+    }
+
+    if (dtUs >= silenceGapUs) {
+      pushCurrent();
+      current = {
+        startEdgeIndex: i,
+        levels: [level],
+        durationsUs: [0],
+      };
+      continue;
+    }
+
+    current.levels.push(level);
+    current.durationsUs.push(dtUs);
+  }
+
+  pushCurrent();
+  return frames;
 }
 
 /**
@@ -94,6 +176,31 @@ function renderRawSignal(capture, options = {}) {
     `timeline:  ${timeline}`,
     `edges:     ${labels}${durationsUs.length > (options.maxLabels ?? 24) ? "  ..." : ""}`,
   ].join("\n");
+}
+
+/**
+ * @param {any} capture
+ * @param {{ silenceGapUs: number, minEdges?: number, targetWidth?: number, maxLabels?: number }} options
+ * @returns {string | null}
+ */
+function renderSegmentedFrames(capture, options) {
+  const frames = segmentRawFrames(capture, options.silenceGapUs, options.minEdges ?? 1);
+  if (!frames.length) return null;
+
+  const lines = [
+    `frames:    count=${frames.length}  silenceGap=${formatDurationUs(options.silenceGapUs)}  minEdges=${options.minEdges ?? 1}`,
+  ];
+
+  for (const frame of frames) {
+    lines.push("");
+    lines.push(`frame[${frame.index}] edges=${frame.edges} sourceEdges=${frame.startEdgeIndex}..${frame.endEdgeIndex} total=${formatDurationUs(frame.totalUs)}`);
+    lines.push(renderRawSignal(frame, {
+      targetWidth: options.targetWidth,
+      maxLabels: options.maxLabels,
+    }) ?? "signal:    unavailable");
+  }
+
+  return lines.join("\n");
 }
 
 /**
@@ -146,6 +253,8 @@ module.exports = {
   extractRawSignal,
   loadCaptureFile,
   renderRawSignal,
+  renderSegmentedFrames,
   saveCaptureFile,
+  segmentRawFrames,
   summarizeCaptureFile,
 };

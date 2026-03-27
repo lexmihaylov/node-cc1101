@@ -3,10 +3,11 @@
 const { Gpio } = require("pigpio");
 const { CC1101Driver } = require("../driver");
 const { sleep } = require("../utils");
-const { loadCaptureFile } = require("./capture-file");
+const { loadCaptureFile, segmentRawFrames } = require("./capture-file");
 
 /**
  * @typedef {object} ReplayWindow
+ * @property {number} frameIndex
  * @property {number} start
  * @property {number} end
  * @property {number[]} levels
@@ -34,44 +35,47 @@ function sleepUs(us) {
 
 /**
  * @param {any} capture
- * @param {{
- *   sliceStart?: number,
- *   sliceEnd?: number
- * }=} options
+ * @param {{ silenceGapUs?: number, frameIndex?: number }=} options
  * @returns {ReplayWindow}
  */
 function buildReplayFromCapture(capture, options = {}) {
-  const total = capture.edges?.length ?? capture.levels?.length ?? 0;
-  const sliceStart = options.sliceStart ?? 0;
-  const sliceEnd = options.sliceEnd ?? (total - 1);
-  const start = Math.max(0, sliceStart);
-  const end = Math.min(total - 1, sliceEnd);
+  let frameIndex = options.frameIndex ?? 0;
+  let start = 0;
+  let end = 0;
+  let levels = [];
+  let durationsUs = [];
 
-  if (total === 0 || start > end) {
-    throw new Error("Invalid or empty capture/slice");
-  }
-
-  const levels = [];
-  const durationsUs = [];
   if (capture.edges && Array.isArray(capture.edges)) {
-    for (let i = start; i <= end; i += 1) {
-      const edge = capture.edges[i];
-      levels.push(edge.level);
-      durationsUs.push(edge.dtUs);
+    const silenceGapUs = Number(options.silenceGapUs ?? 10000);
+    const frames = segmentRawFrames(capture, silenceGapUs, 1);
+    const frame = frames[frameIndex];
+    if (!frame) {
+      throw new Error(`No frame ${frameIndex} found with silenceGapUs=${silenceGapUs}`);
     }
+
+    start = frame.startEdgeIndex;
+    end = frame.endEdgeIndex;
+    levels = frame.levels.slice();
+    durationsUs = frame.durationsUs.slice();
   } else if (
     Array.isArray(capture.levels) &&
     Array.isArray(capture.durationsUs)
   ) {
-    for (let i = start; i <= end; i += 1) {
-      levels.push(capture.levels[i]);
-      durationsUs.push(capture.durationsUs[i]);
-    }
+    frameIndex = 0;
+    start = 0;
+    end = capture.levels.length - 1;
+    levels = capture.levels.map((value) => Number(value));
+    durationsUs = capture.durationsUs.map((value) => Number(value));
   } else {
     throw new Error("Unsupported capture file format");
   }
 
+  if (!levels.length || levels.length !== durationsUs.length) {
+    throw new Error("Invalid or empty replay frame");
+  }
+
   return {
+    frameIndex,
     start,
     end,
     levels,
@@ -115,6 +119,7 @@ class CC1101WindowReplayer {
       await radio.startDirectAsyncTx();
 
       this.options.onMessage(`txDataGpio:    ${this.options.txDataGpio}`);
+      this.options.onMessage(`frame:         ${replay.frameIndex}`);
       this.options.onMessage(`slice:         ${replay.start}..${replay.end}`);
       this.options.onMessage(`steps:         ${replay.durationsUs.length}`);
       this.options.onMessage(`repeats:       ${this.options.repeats}`);
@@ -129,9 +134,10 @@ class CC1101WindowReplayer {
       }
 
       for (let repeat = 0; repeat < this.options.repeats; repeat += 1) {
+        txDataPin.digitalWrite(replay.levels[0] ? 0 : 1);
         for (let i = 0; i < replay.durationsUs.length; i += 1) {
-          txDataPin.digitalWrite(replay.levels[i] ? 1 : 0);
           sleepUs(replay.durationsUs[i]);
+          txDataPin.digitalWrite(replay.levels[i] ? 1 : 0);
         }
 
         txDataPin.digitalWrite(0);
