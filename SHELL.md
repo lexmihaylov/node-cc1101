@@ -144,7 +144,7 @@ cc1101> spectrum 433.7 434.2 25 25 5
 cc1101> spectrum 868.0 869.0 100 15 2
 ```
 
-`spectrum live` repeats the sweep continuously and redraws the terminal with braille-style cells for a denser graph. It uses a faster scan path than the one-shot sweep, redraws after each measured point, and keeps a short max-hold trace so brief bursts remain visible long enough to spot them. Stop it with `stop` or Ctrl+C.
+`spectrum live` repeats the sweep continuously and redraws the terminal with a fixed dBm-scale block graph. It uses a faster scan path than the one-shot sweep, redraws after each measured point, and keeps a short max-hold trace so brief bursts remain visible long enough to spot them. Stop it with `stop` or Ctrl+C.
 
 This is a received-power sweep using RSSI. It is not an IQ capture, waterfall, or protocol decoder.
 
