@@ -43,12 +43,6 @@ Or:
 node radio-shell.js
 ```
 
-Run the TUI:
-
-```bash
-npm run tui
-```
-
 ## Wiring
 
 Minimum SPI wiring:
@@ -236,31 +230,6 @@ The shell no longer accepts RX/TX GPIO pins as command arguments. Those values a
 - TX/replay/send: `GDO0 -> GPIO24`
 
 Detailed shell documentation is available in [SHELL.md](/home/lex/projects/node-cc1101/SHELL.md).
-
-## TUI
-
-A minimal terminal UI based on `@blessed/neo-blessed` is available in [`radio-tui.js`](/home/lex/projects/node-cc1101/radio-tui.js).
-
-Start it with:
-
-```bash
-npm run tui
-```
-
-Current layout:
-
-- top status bar
-- left output/log pane
-- right preview pane
-- bottom command input
-
-Keys:
-
-- `Enter`: run the current command
-- `Ctrl+C`: stop the active runtime
-- `q`: quit the TUI
-
-The TUI uses the same manifest-driven command backend as the shell. It is intentionally simple and aimed at basic operation on Raspberry Pi hardware rather than a full-screen dashboard.
 
 ## Project structure
 

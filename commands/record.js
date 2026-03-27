@@ -50,7 +50,8 @@ module.exports = {
         "",
       ].join("\n");
 
-      shell.renderFrame(`\u001b[2J\u001b[H${header}${frame}\n`);
+      process.stdout.write("\u001b[2J\u001b[H");
+      process.stdout.write(`${header}${frame}\n`);
     };
 
     shell.runtime = new CC1101StreamRecorder({

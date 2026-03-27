@@ -48,8 +48,6 @@ class RadioShell {
    *   device?: number,
    *   speedHz?: number,
    *   commandRegistry?: CommandRegistry,
-   *   clearTerminal?: () => void,
-   *   renderFrame?: (frame: string) => void,
    * }=} options
    */
   constructor(options = {}) {
@@ -61,12 +59,6 @@ class RadioShell {
     this.listening = false;
     this.runtime = null;
     this.radioConfig = createDefaultRadioConfig();
-    this.clearTerminal = options.clearTerminal ?? (() => {
-      process.stdout.write("\u001bc");
-    });
-    this.renderFrame = options.renderFrame ?? ((frame) => {
-      process.stdout.write(frame);
-    });
   }
 
   async ensureConnected() {
@@ -287,4 +279,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { RadioShell, executeCommand };
+module.exports = { RadioShell };
