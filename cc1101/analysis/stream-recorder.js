@@ -14,7 +14,6 @@ const { saveCaptureFile } = require("./capture-file");
  * @property {number=} device
  * @property {number=} speedHz
  * @property {number=} rxDataGpio
- * @property {number=} minDtUs
  * @property {number=} previewIntervalMs
  * @property {number=} previewEdgeWindow
  * @property {number=} previewWindowMs
@@ -37,7 +36,6 @@ const { saveCaptureFile } = require("./capture-file");
  * @property {number} durationMs
  * @property {number} edgeCount
  * @property {number} rxDataGpio
- * @property {number} minDtUs
  * @property {string} band
  * @property {string} modulation
  * @property {string} mode
@@ -54,7 +52,6 @@ class CC1101StreamRecorder {
       device: options.device ?? 0,
       speedHz: options.speedHz ?? 100000,
       rxDataGpio: options.rxDataGpio ?? 24,
-      minDtUs: options.minDtUs ?? 80,
       previewIntervalMs: options.previewIntervalMs ?? 120,
       previewEdgeWindow: options.previewEdgeWindow ?? 16,
       previewWindowMs: options.previewWindowMs ?? 2400,
@@ -164,8 +161,6 @@ class CC1101StreamRecorder {
     if (dtUs < 0) dtUs += 0x100000000;
     this.lastTick = tick;
 
-    if (dtUs < this.options.minDtUs) return;
-
     this.edges.push({
       idx: this.edges.length,
       level,
@@ -213,7 +208,7 @@ class CC1101StreamRecorder {
     this.rxDataPin.on("alert", (level, tick) => this.handleAlert(level, tick));
     this.previewTimer = setInterval(() => this.emitPreview(), this.options.previewIntervalMs);
     this.options.onMessage(
-      `recording stream rxDataGpio=${this.options.rxDataGpio} minDtUs=${this.options.minDtUs} file=${this.options.filepath}`
+      `recording stream rxDataGpio=${this.options.rxDataGpio} file=${this.options.filepath}`
     );
     this.options.onMessage("use `stop` to finish and save the stream");
   }
@@ -256,7 +251,6 @@ class CC1101StreamRecorder {
       durationMs: Math.max(0, stoppedAtMs - this.startedAtMs),
       edgeCount: this.edges.length,
       rxDataGpio: this.options.rxDataGpio,
-      minDtUs: this.options.minDtUs,
       band: BAND.MHZ_433,
       modulation: MODULATION.OOK,
       mode: RADIO_MODE.DIRECT_ASYNC,

@@ -65,7 +65,7 @@ Defaults:
 - `listen [pollMs|gpio] [silenceGapUs] [minEdges]`
 - `send <hex-bytes...>`
 - `send <file> [txDataGpio] [repeats]`
-- `record <file> [rxDataGpio] [minDtUs]`
+- `record <file> [rxDataGpio]`
 - `replay <file> [txDataGpio] [repeats]`
 - `show <file>`
 - `stop`
@@ -124,6 +124,12 @@ In direct-async mode the listener has two states:
 
 It starts in `silence`. The first edge changes the state to `signal_detected`. If no new edge arrives for at least `silenceGapUs`, the listener returns to `silence`. The edges collected between those two transitions are treated as one raw signal window and printed.
 
+Each printed raw signal includes:
+
+- `shape`: one Unicode bar-height symbol per edge, scaled by relative duration within that signal
+- `timeline`: a stretched high/low bar view over time
+- `edges`: the raw `level@duration` values
+
 ### `send`
 
 Mode-sensitive send command:
@@ -141,7 +147,7 @@ cc1101> mode direct_async 433 ook
 cc1101> send /tmp/rf-captures/session-001.json 24 10
 ```
 
-### `record <file> [rxDataGpio] [minDtUs]`
+### `record <file> [rxDataGpio]`
 
 Records a continuous raw direct-async edge stream to one JSON file.
 
@@ -149,7 +155,6 @@ Arguments:
 
 - `file`: output JSON file
 - `rxDataGpio`: Raspberry Pi input GPIO connected to CC1101 `GDO0`, default `24`
-- `minDtUs`: ignore edges shorter than this threshold, default `80`
 
 While recording, the shell renders a continuously updating sampled live preview over the recent time window. The preview shows:
 
@@ -158,13 +163,13 @@ While recording, the shell renders a continuously updating sampled live preview 
 - rough raw duration class over time
 - most recent raw edge values as `level@dtUs`
 
-No snapping, normalization, trimming, decoding, or frame extraction is performed.
+Every observed edge is recorded. No duration threshold, snapping, normalization, trimming, decoding, or frame extraction is performed.
 
 Example:
 
 ```text
 cc1101> mode direct_async 433 ook
-cc1101> record /tmp/rf-captures/session-001.json 24 80
+cc1101> record /tmp/rf-captures/session-001.json 24
 cc1101> stop
 ```
 
@@ -188,6 +193,12 @@ cc1101> replay /tmp/rf-captures/session-001.json 24 10
 
 Prints a short summary of a saved JSON file.
 
+For raw edge files, `show` also renders:
+
+- `shape`: compact per-edge duration shape
+- `timeline`: scaled high/low timing view
+- `edges`: raw `level@duration` labels
+
 ### `stop`
 
 Stops the active packet listener or direct-async runtime.
@@ -200,7 +211,7 @@ Stops active work and sends the radio to IDLE.
 
 ```text
 cc1101> mode direct_async 433 ook
-cc1101> record /tmp/rf-captures/session-001.json 24 80
+cc1101> record /tmp/rf-captures/session-001.json 24
 cc1101> stop
 cc1101> show /tmp/rf-captures/session-001.json
 cc1101> replay /tmp/rf-captures/session-001.json 24 10

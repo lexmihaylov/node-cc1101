@@ -4,6 +4,7 @@ const { Gpio } = require("pigpio");
 const { CC1101Driver } = require("../driver");
 const { BAND, MODULATION, RADIO_MODE } = require("../profiles");
 const { sleep } = require("../utils");
+const { renderRawSignal } = require("./capture-file");
 
 /**
  * @typedef {"silence" | "signal_detected"} RawListenerState
@@ -46,9 +47,14 @@ class CC1101RawListener {
         this.options.onMessage("---- raw signal ----");
         this.options.onMessage(`ts:          ${frame.ts}`);
         this.options.onMessage(`reason:      ${frame.reason}`);
-        this.options.onMessage(`edges:       ${frame.edges}`);
-        this.options.onMessage(`levels:      ${frame.levels.join(",")}`);
-        this.options.onMessage(`durations:   ${frame.durationsUs.join(",")}`);
+        const rendered = renderRawSignal(frame);
+        if (rendered) {
+          this.options.onMessage(rendered);
+        } else {
+          this.options.onMessage(`edges:       ${frame.edges}`);
+          this.options.onMessage(`levels:      ${frame.levels.join(",")}`);
+          this.options.onMessage(`durations:   ${frame.durationsUs.join(",")}`);
+        }
         this.options.onMessage("");
       }),
       onStateChange: options.onStateChange ?? ((state) => {

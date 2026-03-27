@@ -151,7 +151,7 @@ cc1101> listen 20
 cc1101> send aa 55 01
 
 cc1101> mode direct_async 433 ook
-cc1101> record /tmp/rf-captures/session-001.json 24 80
+cc1101> record /tmp/rf-captures/session-001.json 24
 cc1101> stop
 cc1101> show /tmp/rf-captures/session-001.json
 cc1101> replay /tmp/rf-captures/session-001.json 24 10
@@ -167,7 +167,7 @@ cc1101> replay /tmp/rf-captures/session-001.json 24 10
 - `listen [pollMs|gpio] [silenceGapUs] [minEdges]`
 - `send <hex-bytes...>`
 - `send <file> [txDataGpio] [repeats]`
-- `record <file> [rxDataGpio] [minDtUs]`
+- `record <file> [rxDataGpio]`
 - `replay <file> [txDataGpio] [repeats]`
 - `show <file>`
 - `stop`
@@ -182,7 +182,14 @@ cc1101> man record
 cc1101> man replay
 ```
 
-During `record`, the shell renders a continuously updating sampled live preview over the recent time window and shows raw edge transitions as `level@dtUs`.
+During `record`, the shell renders a continuously updating sampled live preview over the recent time window and shows raw edge transitions as `level@dtUs`. Every observed edge is recorded; no duration threshold is applied.
+
+During direct-async `listen` and `show`, raw signals are also rendered with:
+
+- a compact `shape` row using Unicode bar-height symbols per edge
+- a scaled `timeline` row using high/low bar segments stretched across time
+
+This is display-only scaling. Stored timings remain raw microseconds.
 
 In direct-async `listen`, the shell uses a simple state machine:
 

@@ -6,6 +6,7 @@ const { CC1101RawListener } = require("./cc1101/analysis/raw-listener");
 const { CC1101StreamRecorder } = require("./cc1101/analysis/stream-recorder");
 const {
   loadCaptureFile,
+  renderRawSignal,
   summarizeCaptureFile,
 } = require("./cc1101/analysis/capture-file");
 const {
@@ -202,18 +203,17 @@ const MANUALS = {
     "  record - capture one continuous direct-async edge stream to a file",
     "",
     "USAGE",
-    "  record <file> [rxDataGpio] [minDtUs]",
+    "  record <file> [rxDataGpio]",
     "",
     "OPTIONS",
     "  file",
     "    Output JSON file that receives the full recorded edge stream.",
     "  rxDataGpio",
     "    Raspberry Pi input GPIO connected to CC1101 GDO0. Default 24.",
-    "  minDtUs",
-    "    Ignore edges shorter than this many microseconds. Default 80 us.",
     "",
     "DESCRIPTION",
     "  Stores the raw edge stream exactly as seen on the GPIO line.",
+    "  Every observed edge is recorded. No duration threshold is applied.",
     "  No normalization, snapping, trimming, decoding, or frame extraction is performed.",
     "  While recording, the shell renders a continuously updating sampled live preview over the",
     "  recent time window and shows the most recent raw edge values.",
@@ -250,7 +250,9 @@ const MANUALS = {
     "    Any saved stream/frame/capture JSON file.",
     "",
     "DESCRIPTION",
-    "  Prints a short summary including timestamp, edge count, base timing, and top-level fields.",
+    "  Prints a short summary including timestamp, edge count, and top-level fields.",
+    "  For raw edge files, it also renders a compact shape row and a scaled high/low timeline",
+    "  so similar captures can be compared visually without changing the stored timings.",
   ].join("\n"),
   stop: [
     "NAME",
@@ -423,7 +425,7 @@ class RadioShell {
     console.log("  listen [pollMs|gpio] [silenceGapUs] [minEdges]");
     console.log("  send <hex-bytes...>");
     console.log("  send <file> [txDataGpio] [repeats]");
-    console.log("  record <file> [rxDataGpio] [minDtUs]");
+    console.log("  record <file> [rxDataGpio]");
     console.log("  replay <file> [txDataGpio] [repeats]");
     console.log("  show <file>");
     console.log("  stop");
@@ -438,7 +440,7 @@ class RadioShell {
     console.log("  send aa 55 01");
     console.log("  mode direct_async 433 ook");
     console.log("  listen 24 10000 8");
-    console.log("  record /tmp/rf-captures/session-001.json 24 80");
+    console.log("  record /tmp/rf-captures/session-001.json 24");
     console.log("  stop");
     console.log("  show /tmp/rf-captures/session-001.json");
     console.log("  replay /tmp/rf-captures/session-001.json 24 10");
@@ -612,7 +614,7 @@ class RadioShell {
     await this.replay(file, txDataGpio ?? 24, repeats ?? 10);
   }
 
-  async record(file, rxDataGpio = 24, minDtUs = 80) {
+  async record(file, rxDataGpio = 24) {
     if (!file) {
       throw new Error("record requires an output file path");
     }
@@ -623,7 +625,7 @@ class RadioShell {
     const renderLiveRecordFrame = (frame) => {
       const header = [
         `${COLOR.cyan}record${COLOR.reset} ${COLOR.dim}| live preview${COLOR.reset}`,
-        `${COLOR.blue}file${COLOR.reset}=${file}  ${COLOR.blue}gpio${COLOR.reset}=${Number(rxDataGpio)}  ${COLOR.blue}minDtUs${COLOR.reset}=${Number(minDtUs)}`,
+        `${COLOR.blue}file${COLOR.reset}=${file}  ${COLOR.blue}gpio${COLOR.reset}=${Number(rxDataGpio)}`,
         `${COLOR.dim}Ctrl+C or 'stop' ends recording and saves the stream${COLOR.reset}`,
         "",
       ].join("\n");
@@ -638,7 +640,6 @@ class RadioShell {
       speedHz: this.speedHz,
       filepath: String(file),
       rxDataGpio: Number(rxDataGpio),
-      minDtUs: Number(minDtUs),
       onMessage: (message) => {
         console.log(`[record] ${message}`);
       },
@@ -660,6 +661,11 @@ class RadioShell {
       file,
       ...summarizeCaptureFile(capture),
     }, null, 2));
+    const rendered = renderRawSignal(capture);
+    if (rendered) {
+      console.log("");
+      console.log(rendered);
+    }
   }
 
   async stop() {
@@ -717,7 +723,7 @@ async function executeCommand(shell, line, onExit) {
   } else if (command === "send") {
     await shell.send([subcommand, ...rest].filter(Boolean));
   } else if (command === "record") {
-    await shell.record(subcommand, rest[0], rest[1], rest[2]);
+    await shell.record(subcommand, rest[0]);
   } else if (command === "replay") {
     await shell.replay(subcommand, rest[0], rest[1], rest[2], rest[3]);
   } else if (command === "show") {
