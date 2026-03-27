@@ -142,7 +142,8 @@ const MANUALS = {
     "  and prints a terminal spectrum view using the current band/modulation preset.",
     "  `spectrum live` repeats that sweep continuously and redraws the terminal",
     "  using a braille-style graph for higher density.",
-    "  Live mode defaults to dwellMs=8 and samples=1 for faster refresh.",
+    "  Live mode defaults to stepKHz=100, dwellMs=2, and samples=1 for faster refresh,",
+    "  updates on each measured point, and keeps a short max-hold trace for brief bursts.",
     "  This is a received-power sweep, not an IQ or waterfall display.",
     "",
     "EXAMPLES",
@@ -498,6 +499,78 @@ function renderBrailleSpectrum(points, stepKHz, sweepCount) {
   ].join("\n");
 }
 
+function renderBrailleSpectrumPreview(points, stepKHz, sweepCount, pointIndex, totalPoints, holdValues = []) {
+  const presentPoints = points.filter((point) => point && Number.isFinite(point.rssiDbm));
+  if (!presentPoints.length) return "no spectrum samples";
+
+  const values = presentPoints.map((point) => point.rssiDbm);
+  const holdPresent = holdValues.filter((value) => Number.isFinite(value));
+  const min = Math.min(...values, ...(holdPresent.length ? holdPresent : values));
+  const max = Math.max(...values, ...(holdPresent.length ? holdPresent : values));
+  const span = Math.max(max - min, 1);
+
+  const sampleValue = (point) => {
+    if (!point || !Number.isFinite(point.rssiDbm)) return min;
+    return point.rssiDbm;
+  };
+
+  const liveSamples = sampleSpectrumPoints(
+    points.map((point) => ({
+      rssiDbm: sampleValue(point),
+    })),
+    112
+  );
+
+  const holdSamples = holdValues.length
+    ? sampleSpectrumPoints(
+      holdValues.map((value) => ({
+        rssiDbm: Number.isFinite(value) ? value : min,
+      })),
+      112
+    )
+    : [];
+
+  const cells = [];
+  const holdRow = [];
+  for (let i = 0; i < liveSamples.length; i += 2) {
+    const leftValue = liveSamples[i];
+    const rightValue = liveSamples[Math.min(i + 1, liveSamples.length - 1)];
+    const leftHeight = Math.max(0, Math.min(4, Math.round(((leftValue - min) / span) * 4)));
+    const rightHeight = Math.max(0, Math.min(4, Math.round(((rightValue - min) / span) * 4)));
+    cells.push(renderBrailleCell(leftHeight, rightHeight));
+
+    if (holdSamples.length) {
+      const leftHold = holdSamples[i];
+      const rightHold = holdSamples[Math.min(i + 1, holdSamples.length - 1)];
+      const leftHoldHeight = Math.max(0, Math.min(4, Math.round(((leftHold - min) / span) * 4)));
+      const rightHoldHeight = Math.max(0, Math.min(4, Math.round(((rightHold - min) / span) * 4)));
+      holdRow.push(renderBrailleCell(leftHoldHeight, rightHoldHeight));
+    }
+  }
+
+  const strongest = [...presentPoints]
+    .sort((left, right) => right.rssiDbm - left.rssiDbm)
+    .slice(0, Math.min(3, presentPoints.length))
+    .map((point, index) => `${index + 1}. ${formatMHz(point.freqMHz, stepKHz)} MHz ${point.rssiDbm.toFixed(1)} dBm`);
+
+  return [
+    `${COLOR.cyan}spectrum${COLOR.reset} ${COLOR.dim}| live preview${COLOR.reset}  sweeps=${sweepCount}  point=${pointIndex}/${totalPoints}`,
+    `${COLOR.blue}range${COLOR.reset}=${formatMHz(points[0].freqMHz, stepKHz)}-${formatMHz(points[points.length - 1].freqMHz, stepKHz)} MHz  ` +
+      `${COLOR.blue}floor${COLOR.reset}=${min.toFixed(1)} dBm  ${COLOR.blue}peak${COLOR.reset}=${max.toFixed(1)} dBm`,
+    `${COLOR.dim}bright row=live  dim row=short max-hold  Ctrl+C or 'stop' ends live spectrum mode${COLOR.reset}`,
+    "",
+    `${max.toFixed(1).padStart(6, " ")} dBm  ${cells.join("")}`,
+    holdRow.length
+      ? `${COLOR.dim}${" ".repeat(8)}${holdRow.join("")}${COLOR.reset}`
+      : `${" ".repeat(8)}${" ".repeat(cells.length)}`,
+    `${min.toFixed(1).padStart(6, " ")} dBm`,
+    `${" ".repeat(8)}${formatMHz(points[0].freqMHz, stepKHz)} MHz${" ".repeat(Math.max(cells.length - 18, 2))}${formatMHz(points[points.length - 1].freqMHz, stepKHz)} MHz`,
+    "",
+    "strongest peaks:",
+    ...strongest,
+  ].join("\n");
+}
+
 function normalizeSpectrumArgs(startMHz, stopMHz, stepKHz, dwellMs, samples, band) {
   const defaults = getDefaultSpectrumRange(band);
   const start = Number(startMHz ?? defaults.startMHz);
@@ -536,8 +609,8 @@ function normalizeLiveSpectrumArgs(startMHz, stopMHz, stepKHz, dwellMs, samples,
   return normalizeSpectrumArgs(
     startMHz,
     stopMHz,
-    stepKHz ?? 50,
-    dwellMs ?? 8,
+    stepKHz ?? 100,
+    dwellMs ?? 2,
     samples ?? 1,
     band
   );
@@ -838,6 +911,13 @@ class RadioShell {
     return points;
   }
 
+  decaySpectrumHold(holdValues, amountDb = 3) {
+    for (let i = 0; i < holdValues.length; i += 1) {
+      if (!Number.isFinite(holdValues[i])) continue;
+      holdValues[i] -= amountDb;
+    }
+  }
+
   async spectrumLive(startMHz, stopMHz, stepKHz = 50, dwellMs = 20, samples = 3) {
     await this.ensureConnected();
     await this.stop();
@@ -864,16 +944,46 @@ class RadioShell {
     this.runtime = runtime;
     let sweepCount = 0;
     await this.prepareSpectrumSweep();
+    const totalPoints = Math.floor(((config.stopMHz - config.startMHz) / config.stepMHz) + 1.5);
+    /** @type {(null | { freqMHz: number, rssiDbm: number })[]} */
+    const previewPoints = [];
+    /** @type {number[]} */
+    const holdValues = [];
+    for (let i = 0; i < totalPoints; i += 1) {
+      const freqMHz = Number((config.startMHz + (config.stepMHz * i)).toFixed(6));
+      previewPoints.push({ freqMHz, rssiDbm: -120 });
+      holdValues.push(-120);
+    }
 
     while (runtime.active) {
-      const points = await this.collectSpectrumSweep(config, {
-        fastMode: true,
-        reconfigure: false,
-      });
-      if (!runtime.active) break;
       sweepCount += 1;
-      process.stdout.write("\u001b[2J\u001b[H");
-      process.stdout.write(`${renderBrailleSpectrum(points, config.stepKHz, sweepCount)}\n`);
+      this.decaySpectrumHold(holdValues, 4);
+
+      for (let pointIndex = 0; pointIndex < totalPoints; pointIndex += 1) {
+        if (!runtime.active) break;
+
+        const freqMHz = Number((config.startMHz + (config.stepMHz * pointIndex)).toFixed(6));
+        await this.radio.setFrequencyMHz(freqMHz);
+        await this.radio.enterRx();
+
+        if (config.dwellMs > 0) {
+          await sleep(config.dwellMs);
+        }
+
+        const rssiDbm = await this.readSpectrumRssi(config.samples, true);
+        previewPoints[pointIndex] = { freqMHz, rssiDbm };
+        holdValues[pointIndex] = Math.max(holdValues[pointIndex], rssiDbm);
+
+        process.stdout.write("\u001b[2J\u001b[H");
+        process.stdout.write(`${renderBrailleSpectrumPreview(
+          previewPoints,
+          config.stepKHz,
+          sweepCount,
+          pointIndex + 1,
+          totalPoints,
+          holdValues
+        )}\n`);
+      }
     }
   }
 
