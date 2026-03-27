@@ -164,7 +164,7 @@ cc1101> replay /tmp/rf-captures/session-001.json 24 10
 - `man [command]`
 - `status`
 - `mode [packet|direct_async] [band] [modulation]`
-- `listen [pollMs|gpio] [threshold] [captureMs] [rssiTolerance]`
+- `listen [pollMs|gpio] [silenceGapUs] [minEdges]`
 - `send <hex-bytes...>`
 - `send <file> [txDataGpio] [repeats]`
 - `record <file> [rxDataGpio] [minDtUs]`
@@ -183,6 +183,13 @@ cc1101> man replay
 ```
 
 During `record`, the shell renders a continuously updating sampled live preview over the recent time window and shows raw edge transitions as `level@dtUs`.
+
+In direct-async `listen`, the shell uses a simple state machine:
+
+- starts in `silence`
+- first edge switches to `signal_detected`
+- if no edge arrives for `silenceGapUs`, the state returns to `silence`
+- edges collected between those transitions are emitted as one raw signal window
 
 Detailed shell documentation is available in [SHELL.md](/home/lex/projects/node-cc1101/SHELL.md).
 

@@ -62,7 +62,7 @@ Defaults:
 - `disconnect`
 - `status`
 - `mode [packet|direct_async] [band] [modulation]`
-- `listen [pollMs|gpio] [threshold] [captureMs] [rssiTolerance]`
+- `listen [pollMs|gpio] [silenceGapUs] [minEdges]`
 - `send <hex-bytes...>`
 - `send <file> [txDataGpio] [repeats]`
 - `record <file> [rxDataGpio] [minDtUs]`
@@ -100,12 +100,12 @@ cc1101> mode packet 433 ook
 cc1101> mode direct_async 433 ook
 ```
 
-### `listen [pollMs|gpio] [threshold] [captureMs] [rssiTolerance]`
+### `listen [pollMs|gpio] [silenceGapUs] [minEdges]`
 
 Mode-sensitive listen command:
 
 - in `packet` mode, starts FIFO packet RX polling
-- in `direct_async` mode, starts an RSSI-triggered raw edge listener on the chosen GPIO
+- in `direct_async` mode, starts a raw edge listener on the chosen GPIO
 
 Examples:
 
@@ -114,8 +114,15 @@ cc1101> mode packet 433 ook
 cc1101> listen 20
 
 cc1101> mode direct_async 433 ook
-cc1101> listen 24 100 220 6
+cc1101> listen 24 10000 8
 ```
+
+In direct-async mode the listener has two states:
+
+- `silence`
+- `signal_detected`
+
+It starts in `silence`. The first edge changes the state to `signal_detected`. If no new edge arrives for at least `silenceGapUs`, the listener returns to `silence`. The edges collected between those two transitions are treated as one raw signal window and printed.
 
 ### `send`
 

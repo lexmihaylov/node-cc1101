@@ -142,28 +142,30 @@ const MANUALS = {
     "",
     "USAGE",
     "  listen [pollMs]",
-    "  listen [gpio] [threshold] [captureMs] [rssiTolerance]",
+    "  listen [gpio] [silenceGapUs] [minEdges]",
     "",
     "MODE BEHAVIOR",
     "  packet mode",
     "    listen [pollMs]",
     "    Starts FIFO packet receive polling.",
     "  direct_async mode",
-    "    listen [gpio] [threshold] [captureMs] [rssiTolerance]",
-    "    Starts a raw OOK listener that triggers on RSSI and prints captured edge windows.",
+    "    listen [gpio] [silenceGapUs] [minEdges]",
+    "    Starts a raw OOK edge listener with two states:",
+    "    silence -> signal_detected -> silence.",
+    "    The edges collected between those state transitions are emitted as one raw signal window.",
     "",
     "OPTIONS",
     "  pollMs",
     "    Packet mode only. Delay between FIFO polling passes. Default 20 ms.",
     "  gpio",
     "    Direct-async mode only. Raspberry Pi GPIO connected to CC1101 GDO0. Default 24.",
-    "  threshold",
-    "    Direct-async mode only. RSSI raw threshold used to arm a capture. Default 100.",
-    "  captureMs",
-    "    Direct-async mode only. Capture window length after trigger. Default 220 ms.",
-    "  rssiTolerance",
-    "    Direct-async mode only. Optional RSSI filter. After the first accepted trigger,",
-    "    later triggers are ignored unless their RSSI stays within triggerRssi +/- tolerance.",
+    "  silenceGapUs",
+    "    Direct-async mode only. If no new edge arrives for at least this many microseconds,",
+    "    the current signal is considered finished and the listener returns to silence.",
+    "    Default 10000 us.",
+    "  minEdges",
+    "    Direct-async mode only. Ignore very short signals with fewer than this many edges.",
+    "    Default 8.",
     "",
     "DESCRIPTION",
     "  Stops any existing runtime before starting a new listener.",
@@ -418,7 +420,7 @@ class RadioShell {
     console.log("  disconnect");
     console.log("  status");
     console.log("  mode [packet|direct_async] [band] [modulation]");
-    console.log("  listen [pollMs|gpio] [threshold] [captureMs] [rssiTolerance]");
+    console.log("  listen [pollMs|gpio] [silenceGapUs] [minEdges]");
     console.log("  send <hex-bytes...>");
     console.log("  send <file> [txDataGpio] [repeats]");
     console.log("  record <file> [rxDataGpio] [minDtUs]");
@@ -435,7 +437,7 @@ class RadioShell {
     console.log("  listen 20");
     console.log("  send aa 55 01");
     console.log("  mode direct_async 433 ook");
-    console.log("  listen 24 100 220 6");
+    console.log("  listen 24 10000 8");
     console.log("  record /tmp/rf-captures/session-001.json 24 80");
     console.log("  stop");
     console.log("  show /tmp/rf-captures/session-001.json");
@@ -531,7 +533,7 @@ class RadioShell {
     }
   }
 
-  async startDirectAsyncListen(gpio = 24, threshold = 100, captureMs = 220, rssiTolerance) {
+  async startDirectAsyncListen(gpio = 24, silenceGapUs = 10000, minEdges = 8) {
     await this.stop();
     await this.disconnect();
 
@@ -540,9 +542,8 @@ class RadioShell {
       device: this.device,
       speedHz: this.speedHz,
       gpio: Number(gpio),
-      threshold: Number(threshold),
-      captureMs: Number(captureMs),
-      rssiTolerance: rssiTolerance !== undefined ? Number(rssiTolerance) : null,
+      silenceGapUs: Number(silenceGapUs),
+      minEdges: Number(minEdges),
       onMessage: (message) => {
         console.log(`[async] ${message}`);
       },
@@ -559,9 +560,8 @@ class RadioShell {
 
     await this.startDirectAsyncListen(
       Number(arg0 ?? 24),
-      Number(arg1 ?? 100),
-      Number(arg2 ?? 220),
-      arg3 !== undefined ? Number(arg3) : undefined
+      Number(arg1 ?? 10000),
+      Number(arg2 ?? 8)
     );
   }
 

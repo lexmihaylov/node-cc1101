@@ -2,16 +2,15 @@
 
 const { Gpio } = require("pigpio");
 const { CC1101Driver } = require("../driver");
-const { STATUS } = require("../constants");
 const { BAND, MODULATION, RADIO_MODE } = require("../profiles");
 const { sleep } = require("../utils");
-const { shouldAcceptTriggerRssi } = require("./rssi-filter");
 
 /**
+ * @typedef {"silence" | "signal_detected"} RawListenerState
+ *
  * @typedef {object} RawFrame
  * @property {string} ts
  * @property {string} reason
- * @property {number | null} triggerRssi
  * @property {number} edges
  * @property {number[]} durationsUs
  * @property {number[]} levels
@@ -21,16 +20,12 @@ const { shouldAcceptTriggerRssi } = require("./rssi-filter");
  * @property {number=} device
  * @property {number=} speedHz
  * @property {number=} gpio
- * @property {number=} threshold
- * @property {number=} captureMs
- * @property {number=} minEdges
- * @property {number=} cooldownMs
- * @property {number=} pretriggerUs
  * @property {number=} silenceGapUs
+ * @property {number=} minEdges
  * @property {number=} pollMs
- * @property {number | null=} rssiTolerance
  * @property {(message: string) => void=} onMessage
  * @property {(frame: RawFrame) => void=} onFrame
+ * @property {(state: RawListenerState) => void=} onStateChange
  */
 
 class CC1101RawListener {
@@ -43,23 +38,21 @@ class CC1101RawListener {
       device: options.device ?? 0,
       speedHz: options.speedHz ?? 100000,
       gpio: options.gpio ?? 24,
-      threshold: options.threshold ?? 100,
-      captureMs: options.captureMs ?? 220,
-      minEdges: options.minEdges ?? 20,
-      cooldownMs: options.cooldownMs ?? 400,
-      pretriggerUs: options.pretriggerUs ?? 10000,
       silenceGapUs: options.silenceGapUs ?? 10000,
+      minEdges: options.minEdges ?? 8,
       pollMs: options.pollMs ?? 5,
-      rssiTolerance: options.rssiTolerance ?? null,
       onMessage: options.onMessage ?? ((message) => console.log(message)),
       onFrame: options.onFrame ?? ((frame) => {
-        this.options.onMessage("---- raw trigger ----");
+        this.options.onMessage("---- raw signal ----");
         this.options.onMessage(`ts:          ${frame.ts}`);
-        this.options.onMessage(`triggerRSSI: ${frame.triggerRssi}`);
+        this.options.onMessage(`reason:      ${frame.reason}`);
         this.options.onMessage(`edges:       ${frame.edges}`);
         this.options.onMessage(`levels:      ${frame.levels.join(",")}`);
         this.options.onMessage(`durations:   ${frame.durationsUs.join(",")}`);
         this.options.onMessage("");
+      }),
+      onStateChange: options.onStateChange ?? ((state) => {
+        this.options.onMessage(`state=${state}`);
       }),
     };
 
@@ -67,62 +60,27 @@ class CC1101RawListener {
     this.input = null;
     this.loopPromise = null;
     this.stopping = false;
-    this.capturing = false;
-    this.captureUntil = 0;
-    this.cooldownUntil = 0;
-    this.currentTriggerRssi = null;
     this.lastTick = 0;
-    this.preBuffer = [];
+    this.lastEdgeAtUs = 0;
+    /** @type {Array<{ level: number, dtUs: number }>} */
     this.frameBuffer = [];
-    this.lastAcceptedTriggerRssi = null;
+    /** @type {RawListenerState} */
+    this.state = "silence";
   }
 
-  async getRssiRaw() {
-    if (!this.radio) {
-      throw new Error("Raw listener radio is not initialized");
-    }
-
-    return this.radio.readRegister(STATUS.RSSI);
+  setState(nextState) {
+    if (this.state === nextState) return;
+    this.state = nextState;
+    this.options.onStateChange(nextState);
   }
 
   resetFrameBuffer() {
     this.frameBuffer = [];
   }
 
-  trimPreBuffer() {
-    let total = 0;
-    const kept = [];
-
-    for (let i = this.preBuffer.length - 1; i >= 0; i -= 1) {
-      const edge = this.preBuffer[i];
-      total += edge.dtUs;
-      kept.push(edge);
-      if (total >= this.options.pretriggerUs) break;
-    }
-
-    this.preBuffer = kept.reverse();
-  }
-
-  pushPreEdge(edge) {
-    this.preBuffer.push(edge);
-    this.trimPreBuffer();
-  }
-
-  beginCapture(rssi, now) {
-    this.capturing = true;
-    this.captureUntil = now + this.options.captureMs;
-    this.currentTriggerRssi = rssi;
-    this.frameBuffer = [...this.preBuffer];
-    this.options.onMessage(`trigger rssi=${rssi}`);
-  }
-
-  endCapture(reason) {
-    this.capturing = false;
-
+  emitFrame(reason) {
     if (this.frameBuffer.length < this.options.minEdges) {
       this.resetFrameBuffer();
-      this.currentTriggerRssi = null;
-      this.cooldownUntil = Date.now() + 100;
       return;
     }
 
@@ -130,18 +88,13 @@ class CC1101RawListener {
     const frame = {
       ts: new Date().toISOString(),
       reason,
-      triggerRssi: this.currentTriggerRssi,
       edges: this.frameBuffer.length,
       durationsUs: this.frameBuffer.map((edge) => edge.dtUs),
       levels: this.frameBuffer.map((edge) => edge.level),
     };
 
-    this.lastAcceptedTriggerRssi = frame.triggerRssi;
     this.options.onFrame(frame);
-
     this.resetFrameBuffer();
-    this.currentTriggerRssi = null;
-    this.cooldownUntil = Date.now() + this.options.cooldownMs;
   }
 
   handleAlert(level, tick) {
@@ -150,25 +103,27 @@ class CC1101RawListener {
       return;
     }
 
+    const nowUs = Date.now() * 1000;
+
     if (this.lastTick === 0) {
       this.lastTick = tick;
+      this.lastEdgeAtUs = nowUs;
+      this.setState("signal_detected");
       return;
     }
 
     let dtUs = tick - this.lastTick;
     if (dtUs < 0) dtUs += 0x100000000;
     this.lastTick = tick;
+    this.lastEdgeAtUs = nowUs;
 
-    const edge = { level, dtUs };
-    this.pushPreEdge(edge);
-
-    if (this.capturing) {
-      this.frameBuffer.push(edge);
-
-      if (dtUs >= this.options.silenceGapUs && this.frameBuffer.length >= this.options.minEdges) {
-        this.endCapture("silence-gap");
-      }
+    if (dtUs >= this.options.silenceGapUs) {
+      this.emitFrame("silence-gap");
+      this.setState("silence");
+      this.setState("signal_detected");
     }
+
+    this.frameBuffer.push({ level, dtUs });
   }
 
   async start() {
@@ -176,13 +131,9 @@ class CC1101RawListener {
 
     this.stopping = false;
     this.lastTick = 0;
-    this.preBuffer = [];
+    this.lastEdgeAtUs = 0;
     this.frameBuffer = [];
-    this.capturing = false;
-    this.captureUntil = 0;
-    this.cooldownUntil = 0;
-    this.currentTriggerRssi = null;
-    this.lastAcceptedTriggerRssi = null;
+    this.state = "silence";
 
     this.radio = new CC1101Driver({
       bus: this.options.bus,
@@ -205,8 +156,9 @@ class CC1101RawListener {
     await sleep(100);
 
     this.options.onMessage(
-      `armed on RSSI < ${this.options.threshold}, capture=${this.options.captureMs}ms, minEdges=${this.options.minEdges}, pretrigger=${this.options.pretriggerUs}us, silenceGap=${this.options.silenceGapUs}us, rssiTolerance=${this.options.rssiTolerance ?? "off"}`
+      `raw edge listen gpio=${this.options.gpio} silenceGapUs=${this.options.silenceGapUs} minEdges=${this.options.minEdges}`
     );
+    this.options.onStateChange(this.state);
 
     this.input.on("alert", (level, tick) => this.handleAlert(level, tick));
     this.loopPromise = this.runLoop().finally(() => {
@@ -216,23 +168,15 @@ class CC1101RawListener {
 
   async runLoop() {
     while (!this.stopping) {
-      const now = Date.now();
-      const rssi = await this.getRssiRaw();
+      const nowUs = Date.now() * 1000;
 
-      if (!this.capturing && now >= this.cooldownUntil && rssi < this.options.threshold) {
-        if (!shouldAcceptTriggerRssi(this.lastAcceptedTriggerRssi, rssi, this.options.rssiTolerance)) {
-          this.options.onMessage(
-            `ignored rssi=${rssi} reference=${this.lastAcceptedTriggerRssi} tolerance=${this.options.rssiTolerance}`
-          );
-          this.cooldownUntil = now + 100;
-          await sleep(this.options.pollMs);
-          continue;
-        }
-        this.beginCapture(rssi, now);
-      }
-
-      if (this.capturing && now >= this.captureUntil) {
-        this.endCapture("capture-window");
+      if (
+        this.state === "signal_detected" &&
+        this.lastEdgeAtUs > 0 &&
+        nowUs - this.lastEdgeAtUs >= this.options.silenceGapUs
+      ) {
+        this.emitFrame("silence-timeout");
+        this.setState("silence");
       }
 
       await sleep(this.options.pollMs);
@@ -242,10 +186,11 @@ class CC1101RawListener {
   async stop() {
     this.stopping = true;
 
-    if (this.capturing) {
+    if (this.state === "signal_detected") {
       try {
-        this.endCapture("shutdown");
+        this.emitFrame("shutdown");
       } catch {}
+      this.setState("silence");
     }
 
     if (this.input) {
