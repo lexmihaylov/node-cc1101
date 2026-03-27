@@ -22,6 +22,7 @@ const { renderSignalSummary } = require("./signal-renderer");
  * @property {number=} previewEdgeWindow
  * @property {string=} filepath
  * @property {(message: string) => void=} onMessage
+ * @property {(frame: string) => void=} onPreview
  *
  * @typedef {object} RecordedStreamEdge
  * @property {number} idx
@@ -61,6 +62,7 @@ class CC1101StreamRecorder {
       previewEdgeWindow: options.previewEdgeWindow ?? 48,
       filepath: options.filepath ?? "/tmp/rf-stream.json",
       onMessage: options.onMessage ?? ((message) => console.log(message)),
+      onPreview: options.onPreview ?? ((frame) => console.log(frame)),
     };
 
     this.radio = null;
@@ -109,7 +111,7 @@ class CC1101StreamRecorder {
       }
     }
 
-    this.options.onMessage(lines.join("\n"));
+    this.options.onPreview(lines.join("\n"));
   }
 
   handleAlert(level, tick) {

@@ -227,8 +227,8 @@ const MANUALS = {
     "DESCRIPTION",
     "  This does not try to isolate one frame while recording.",
     "  It stores the raw stream so later analysis can find repeated patterns across multiple clicks.",
-    "  While recording, the shell prints a rolling preview of recent edges, timing units,",
-    "  and best-effort segment bits when enough data is available.",
+    "  While recording, the shell renders a continuously updating live preview of recent edges,",
+    "  timing units, and best-effort segment bits when enough data is available.",
     "  Finish with `stop`.",
   ].join("\n"),
   analyze: [
@@ -732,6 +732,18 @@ class RadioShell {
     await this.stop();
     await this.disconnect();
 
+    const renderLiveRecordFrame = (frame) => {
+      const header = [
+        `${COLOR.cyan}record${COLOR.reset} ${COLOR.dim}| live preview${COLOR.reset}`,
+        `${COLOR.blue}file${COLOR.reset}=${file}  ${COLOR.blue}gpio${COLOR.reset}=${Number(rxDataGpio)}  ${COLOR.blue}baseUs${COLOR.reset}=${Number(baseUs)}  ${COLOR.blue}minDtUs${COLOR.reset}=${Number(minDtUs)}`,
+        `${COLOR.dim}Ctrl+C or 'stop' ends recording and saves the stream${COLOR.reset}`,
+        "",
+      ].join("\n");
+
+      process.stdout.write("\u001b[2J\u001b[H");
+      process.stdout.write(`${header}${frame}\n`);
+    };
+
     this.runtime = new CC1101StreamRecorder({
       bus: this.bus,
       device: this.device,
@@ -742,6 +754,9 @@ class RadioShell {
       minDtUs: Number(minDtUs),
       onMessage: (message) => {
         console.log(`[record] ${message}`);
+      },
+      onPreview: (frame) => {
+        renderLiveRecordFrame(frame);
       },
     });
 
