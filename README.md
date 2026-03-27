@@ -215,6 +215,8 @@ cc1101> man listen
 cc1101> man decode
 ```
 
+During `record`, the shell prints a rolling preview of recent edges, quantized timing units, and best-effort segment bits while still saving the full raw stream.
+
 ## Project structure
 
 - [`index.js`](/home/lex/projects/node-cc1101/index.js): public package entrypoint

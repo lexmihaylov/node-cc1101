@@ -7,6 +7,8 @@ const { CC1101Driver } = require("../driver");
 const { BAND, MODULATION, RADIO_MODE } = require("../profiles");
 const { VALUE } = require("../constants");
 const { saveCaptureFile } = require("./capture-file");
+const { summarizeFrame, renderBars } = require("./raw-analysis");
+const { renderSignalSummary } = require("./signal-renderer");
 
 /**
  * @typedef {object} StreamRecorderOptions
@@ -16,6 +18,8 @@ const { saveCaptureFile } = require("./capture-file");
  * @property {number=} rxDataGpio
  * @property {number=} minDtUs
  * @property {number=} baseUs
+ * @property {number=} previewIntervalMs
+ * @property {number=} previewEdgeWindow
  * @property {string=} filepath
  * @property {(message: string) => void=} onMessage
  *
@@ -53,6 +57,8 @@ class CC1101StreamRecorder {
       rxDataGpio: options.rxDataGpio ?? 24,
       minDtUs: options.minDtUs ?? 80,
       baseUs: options.baseUs ?? 400,
+      previewIntervalMs: options.previewIntervalMs ?? 500,
+      previewEdgeWindow: options.previewEdgeWindow ?? 48,
       filepath: options.filepath ?? "/tmp/rf-stream.json",
       onMessage: options.onMessage ?? ((message) => console.log(message)),
     };
@@ -62,8 +68,48 @@ class CC1101StreamRecorder {
     this.stopping = false;
     this.lastTick = 0;
     this.startedAtMs = 0;
+    this.previewTimer = null;
+    this.lastPreviewCount = 0;
     /** @type {RecordedStreamEdge[]} */
     this.edges = [];
+  }
+
+  emitPreview() {
+    if (this.edges.length === 0 || this.edges.length === this.lastPreviewCount) return;
+
+    this.lastPreviewCount = this.edges.length;
+    const recent = this.edges.slice(-this.options.previewEdgeWindow);
+    const levels = recent.map((edge) => edge.level);
+    const durationsUs = recent.map((edge) => edge.dtUs);
+    const units = durationsUs.map((duration) => Math.max(1, Math.round(duration / this.options.baseUs)));
+    const frame = {
+      ts: new Date().toISOString(),
+      reason: "preview",
+      triggerRssi: null,
+      edges: recent.length,
+      durationsUs,
+      levels,
+    };
+    const summary = summarizeFrame(frame);
+    const lines = [
+      `preview totalEdges=${this.edges.length} recentEdges=${recent.length}`,
+      ...renderSignalSummary({
+        label: "preview",
+        units,
+        levels,
+        durationsUs,
+        maxSteps: 24,
+      }),
+    ];
+
+    if (summary) {
+      lines.push(`raster: ${renderBars(summary.units, 48)}`);
+      for (const [index, segment] of summary.segments.slice(0, 2).entries()) {
+        lines.push(`seg${index + 1}: units=${segment.units.join(",")} bits=${segment.bits} compact=${segment.compact}`);
+      }
+    }
+
+    this.options.onMessage(lines.join("\n"));
   }
 
   handleAlert(level, tick) {
@@ -99,6 +145,7 @@ class CC1101StreamRecorder {
     this.stopping = false;
     this.lastTick = 0;
     this.startedAtMs = Date.now();
+    this.lastPreviewCount = 0;
     this.edges = [];
 
     this.radio = new CC1101Driver({
@@ -128,6 +175,7 @@ class CC1101StreamRecorder {
     });
 
     this.rxDataPin.on("alert", (level, tick) => this.handleAlert(level, tick));
+    this.previewTimer = setInterval(() => this.emitPreview(), this.options.previewIntervalMs);
     this.options.onMessage(
       `recording stream rxDataGpio=${this.options.rxDataGpio} minDtUs=${this.options.minDtUs} baseUs=${this.options.baseUs} file=${this.options.filepath}`
     );
@@ -139,6 +187,13 @@ class CC1101StreamRecorder {
    */
   async stop() {
     this.stopping = true;
+
+    if (this.previewTimer) {
+      clearInterval(this.previewTimer);
+      this.previewTimer = null;
+    }
+
+    this.emitPreview();
 
     if (this.rxDataPin) {
       try {
