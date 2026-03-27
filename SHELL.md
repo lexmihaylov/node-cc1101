@@ -65,6 +65,7 @@ Defaults:
 - `status`
 - `spectrum [startMHz] [stopMHz] [stepKHz] [dwellMs] [samples]`
 - `spectrum live [startMHz] [stopMHz] [stepKHz] [dwellMs] [samples]`
+- `monitor [freqMHz] [dwellMs] [samples]`
 - `mode [packet|direct_async] [band] [modulation]`
 - `listen [pollMs]`
 - `listen [silenceGapUs] [sampleRateUs]`
@@ -147,6 +148,26 @@ cc1101> spectrum 868.0 869.0 100 15 2
 `spectrum live` repeats the sweep continuously and redraws the terminal with a fixed dBm-scale block graph. It uses a faster scan path than the one-shot sweep, redraws after each measured point, and keeps a short max-hold trace so brief bursts remain visible long enough to spot them. Stop it with `stop` or Ctrl+C.
 
 This is a received-power sweep using RSSI. It is not an IQ capture, waterfall, or protocol decoder.
+
+### `monitor [freqMHz] [dwellMs] [samples]`
+
+Parks on one frequency and shows live RSSI updates on a fixed `-110..-40 dBm` scale.
+
+Arguments:
+
+- `freqMHz`: center frequency in MHz, default is the current band center
+- `dwellMs`: delay between updates, default `5`
+- `samples`: RSSI reads averaged per update, default `1`
+
+Examples:
+
+```text
+cc1101> monitor
+cc1101> monitor 433.92
+cc1101> monitor 433.92 2 1
+```
+
+Use this when you want to visualize very short clicks or verify that the receiver is producing sensible RSSI changes in real time. It is generally more responsive than sweeping a range.
 
 ### `listen [pollMs]`
 
