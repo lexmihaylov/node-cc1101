@@ -154,7 +154,7 @@ cc1101> mode direct_async 433 ook
 cc1101> record /tmp/rf-captures/session-001.json 24
 cc1101> stop
 cc1101> show /tmp/rf-captures/session-001.json 10000
-cc1101> replay /tmp/rf-captures/session-001.json 0 10000 24 10
+cc1101> replay /tmp/rf-captures/session-001.json 0 10000 24 10 false
 ```
 
 ### Main shell commands
@@ -166,9 +166,9 @@ cc1101> replay /tmp/rf-captures/session-001.json 0 10000 24 10
 - `mode [packet|direct_async] [band] [modulation]`
 - `listen [pollMs|gpio] [silenceGapUs]`
 - `send <hex-bytes...>`
-- `send <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats]`
+- `send <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats] [invert]`
 - `record <file> [rxDataGpio]`
-- `replay <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats]`
+- `replay <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats] [invert]`
 - `show <file> [silenceGapUs]`
 - `stop`
 - `idle`

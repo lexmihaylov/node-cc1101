@@ -146,7 +146,7 @@ cc1101> mode packet 433 ook
 cc1101> send aa 55 01
 
 cc1101> mode direct_async 433 ook
-cc1101> send /tmp/rf-captures/session-001.json 0 10000 24 10
+cc1101> send /tmp/rf-captures/session-001.json 0 10000 24 10 false
 ```
 
 ### `record <file> [rxDataGpio]`
@@ -175,7 +175,7 @@ cc1101> record /tmp/rf-captures/session-001.json 24
 cc1101> stop
 ```
 
-### `replay <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats]`
+### `replay <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats] [invert]`
 
 Replays a saved raw edge file through the Raspberry Pi GPIO line that feeds the CC1101 async TX data input.
 
@@ -186,6 +186,7 @@ Arguments:
 - `silenceGapUs`: silence threshold used to split the stream into frames, default `10000`
 - `txDataGpio`: Raspberry Pi output GPIO driving CC1101 `GDO0` in TX, default `24`
 - `repeats`: number of times to transmit the sequence, default `10`
+- `invert`: invert replay polarity, default `false`
 
 For raw stream files, replay first segments the file into silence-delimited frames, then replays the selected frame with its first edge rebased to `0 us`.
 Before replay, the extracted frame is also passed through the same `150us` short pulse glitch suppressor used by `show`.
@@ -193,7 +194,7 @@ Before replay, the extracted frame is also passed through the same `150us` short
 Example:
 
 ```text
-cc1101> replay /tmp/rf-captures/session-001.json 0 10000 24 10
+cc1101> replay /tmp/rf-captures/session-001.json 0 10000 24 10 false
 ```
 
 ### `show <file> [silenceGapUs]`
@@ -228,7 +229,7 @@ cc1101> mode direct_async 433 ook
 cc1101> record /tmp/rf-captures/session-001.json 24
 cc1101> stop
 cc1101> show /tmp/rf-captures/session-001.json 10000
-cc1101> replay /tmp/rf-captures/session-001.json 0 10000 24 10
+cc1101> replay /tmp/rf-captures/session-001.json 0 10000 24 10 false
 ```
 
 Direct async wiring model:

@@ -178,7 +178,7 @@ const MANUALS = {
     "",
     "USAGE",
     "  send <hex-bytes...>",
-    "  send <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats]",
+    "  send <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats] [invert]",
     "",
     "MODE BEHAVIOR",
     "  packet mode",
@@ -197,6 +197,9 @@ const MANUALS = {
     "    Raspberry Pi output GPIO driving the CC1101 GDO0 TX data input. Default 24.",
     "  repeats",
     "    Number of transmissions. Default 10.",
+    "  invert",
+    "    Invert replay polarity. Accepts true/false, 1/0, yes/no, invert/normal.",
+    "    Default false.",
     "",
     "DESCRIPTION",
     "  Use `send` instead of separate TX verbs. In packet mode it writes FIFO data.",
@@ -229,7 +232,7 @@ const MANUALS = {
     "  replay - transmit a saved raw edge file through direct async TX",
     "",
     "USAGE",
-    "  replay <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats]",
+    "  replay <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats] [invert]",
     "",
     "OPTIONS",
     "  file",
@@ -242,6 +245,9 @@ const MANUALS = {
     "    Raspberry Pi output GPIO driving CC1101 GDO0 in TX. Default 24.",
     "  repeats",
     "    Number of times to transmit the sequence. Default 10.",
+    "  invert",
+    "    Invert replay polarity. Accepts true/false, 1/0, yes/no, invert/normal.",
+    "    Default false.",
     "",
     "DESCRIPTION",
     "  Stops active work, puts the radio into direct async TX, segments the file into frames",
@@ -369,6 +375,16 @@ function parseMode(value, fallback) {
   throw new Error(`Invalid mode: ${value}`);
 }
 
+function parseBooleanFlag(value, fallback = false) {
+  if (value === undefined || value === null || value === "") return fallback;
+
+  const normalized = String(value).toLowerCase();
+  if (["1", "true", "yes", "on", "invert", "inverted"].includes(normalized)) return true;
+  if (["0", "false", "no", "off", "normal"].includes(normalized)) return false;
+
+  throw new Error(`Invalid boolean flag: ${value}`);
+}
+
 async function stableRead(radio, address) {
   let previous = await radio.readRegister(address);
   for (let i = 0; i < 3; i += 1) {
@@ -442,9 +458,9 @@ class RadioShell {
     console.log("  mode [packet|direct_async] [band] [modulation]");
     console.log("  listen [pollMs|gpio] [silenceGapUs]");
     console.log("  send <hex-bytes...>");
-    console.log("  send <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats]");
+    console.log("  send <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats] [invert]");
     console.log("  record <file> [rxDataGpio]");
-    console.log("  replay <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats]");
+    console.log("  replay <file> [frameIndex] [silenceGapUs] [txDataGpio] [repeats] [invert]");
     console.log("  show <file> [silenceGapUs]");
     console.log("  stop");
     console.log("  idle");
@@ -461,7 +477,7 @@ class RadioShell {
     console.log("  record /tmp/rf-captures/session-001.json 24");
     console.log("  stop");
     console.log("  show /tmp/rf-captures/session-001.json 10000");
-    console.log("  replay /tmp/rf-captures/session-001.json 0 10000 24 10");
+    console.log("  replay /tmp/rf-captures/session-001.json 0 10000 24 10 false");
   }
 
   printManual(command) {
@@ -583,7 +599,7 @@ class RadioShell {
     );
   }
 
-  async replay(file, frameIndex = 0, silenceGapUs = 10000, txDataGpio = 24, repeats = 10) {
+  async replay(file, frameIndex = 0, silenceGapUs = 10000, txDataGpio = 24, repeats = 10, invert = false) {
     if (!file) {
       throw new Error("replay requires a capture file path");
     }
@@ -603,6 +619,7 @@ class RadioShell {
       speedHz: this.speedHz,
       txDataGpio: Number(txDataGpio),
       repeats: Number(repeats),
+      invert: parseBooleanFlag(invert, false),
       onMessage: (message) => {
         console.log(`[replay] ${message}`);
       },
@@ -625,12 +642,12 @@ class RadioShell {
       return;
     }
 
-    const [file, frameIndex, silenceGapUs, txDataGpio, repeats] = args;
+    const [file, frameIndex, silenceGapUs, txDataGpio, repeats, invert] = args;
     if (!fs.existsSync(String(file))) {
       throw new Error("direct_async send requires a replayable file path");
     }
 
-    await this.replay(file, frameIndex ?? 0, silenceGapUs ?? 10000, txDataGpio ?? 24, repeats ?? 10);
+    await this.replay(file, frameIndex ?? 0, silenceGapUs ?? 10000, txDataGpio ?? 24, repeats ?? 10, invert ?? false);
   }
 
   async record(file, rxDataGpio = 24) {

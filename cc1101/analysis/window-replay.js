@@ -22,6 +22,7 @@ const { loadCaptureFile, segmentRawFrames } = require("./capture-file");
  * @property {number=} repeats
  * @property {number=} repeatGapUs
  * @property {number=} preDelayMs
+ * @property {boolean=} invert
  * @property {(message: string) => void=} onMessage
  */
 
@@ -96,6 +97,7 @@ class CC1101WindowReplayer {
       repeats: options.repeats ?? 10,
       repeatGapUs: options.repeatGapUs ?? 10000,
       preDelayMs: options.preDelayMs ?? 1000,
+      invert: options.invert ?? false,
       onMessage: options.onMessage ?? ((message) => console.log(message)),
     };
   }
@@ -124,7 +126,8 @@ class CC1101WindowReplayer {
       this.options.onMessage(`steps:         ${replay.durationsUs.length}`);
       this.options.onMessage(`repeats:       ${this.options.repeats}`);
       this.options.onMessage(`repeatGapUs:   ${this.options.repeatGapUs}`);
-      this.options.onMessage(`levels:        ${replay.levels.join(",")}`);
+      this.options.onMessage(`invert:        ${this.options.invert ? "yes" : "no"}`);
+      this.options.onMessage(`levels:        ${replay.levels.map((level) => this.options.invert ? (level ? 0 : 1) : level).join(",")}`);
       this.options.onMessage(`durationsUs:   ${replay.durationsUs.join(",")}`);
       this.options.onMessage("");
 
@@ -134,10 +137,12 @@ class CC1101WindowReplayer {
       }
 
       for (let repeat = 0; repeat < this.options.repeats; repeat += 1) {
-        txDataPin.digitalWrite(replay.levels[0] ? 0 : 1);
+        const firstLevel = this.options.invert ? (replay.levels[0] ? 0 : 1) : replay.levels[0];
+        txDataPin.digitalWrite(firstLevel ? 0 : 1);
         for (let i = 0; i < replay.durationsUs.length; i += 1) {
           sleepUs(replay.durationsUs[i]);
-          txDataPin.digitalWrite(replay.levels[i] ? 1 : 0);
+          const level = this.options.invert ? (replay.levels[i] ? 0 : 1) : replay.levels[i];
+          txDataPin.digitalWrite(level ? 1 : 0);
         }
 
         txDataPin.digitalWrite(0);
