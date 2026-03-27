@@ -437,11 +437,18 @@ function renderSpectrum(points, stepKHz) {
 }
 
 function sampleSpectrumPoints(points, targetCount) {
-  if (points.length <= targetCount) {
-    return points.map((point) => point.rssiDbm);
+  if (!points.length || targetCount <= 0) {
+    return [];
   }
 
   const sampled = [];
+  if (points.length === 1) {
+    for (let index = 0; index < targetCount; index += 1) {
+      sampled.push(points[0].rssiDbm);
+    }
+    return sampled;
+  }
+
   for (let index = 0; index < targetCount; index += 1) {
     const sourceIndex = Math.round(index * (points.length - 1) / Math.max(targetCount - 1, 1));
     sampled.push(points[sourceIndex].rssiDbm);
