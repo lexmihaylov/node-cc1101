@@ -123,6 +123,7 @@ const MANUALS = {
     "",
     "USAGE",
     "  spectrum [startMHz] [stopMHz] [stepKHz] [dwellMs] [samples]",
+    "  spectrum live [startMHz] [stopMHz] [stepKHz] [dwellMs] [samples]",
     "",
     "OPTIONS",
     "  startMHz",
@@ -139,10 +140,13 @@ const MANUALS = {
     "DESCRIPTION",
     "  Tunes the radio across the requested range, measures RSSI at each step,",
     "  and prints a terminal spectrum view using the current band/modulation preset.",
+    "  `spectrum live` repeats that sweep continuously and redraws the terminal",
+    "  using a braille-style graph for higher density.",
     "  This is a received-power sweep, not an IQ or waterfall display.",
     "",
     "EXAMPLES",
     "  spectrum",
+    "  spectrum live",
     "  spectrum 433.7 434.2 25 25 5",
     "  spectrum 868.0 869.0 100 15 2",
   ].join("\n"),
@@ -426,6 +430,107 @@ function renderSpectrum(points, stepKHz) {
   ].join("\n");
 }
 
+function sampleSpectrumPoints(points, targetCount) {
+  if (points.length <= targetCount) {
+    return points.map((point) => point.rssiDbm);
+  }
+
+  const sampled = [];
+  for (let index = 0; index < targetCount; index += 1) {
+    const sourceIndex = Math.round(index * (points.length - 1) / Math.max(targetCount - 1, 1));
+    sampled.push(points[sourceIndex].rssiDbm);
+  }
+  return sampled;
+}
+
+function renderBrailleCell(leftHeight, rightHeight) {
+  const leftBits = [0x40, 0x04, 0x02, 0x01];
+  const rightBits = [0x80, 0x20, 0x10, 0x08];
+  let mask = 0;
+
+  for (let i = 0; i < leftHeight; i += 1) {
+    mask |= leftBits[i];
+  }
+  for (let i = 0; i < rightHeight; i += 1) {
+    mask |= rightBits[i];
+  }
+
+  return String.fromCodePoint(0x2800 + mask);
+}
+
+function renderBrailleSpectrum(points, stepKHz, sweepCount) {
+  if (!points.length) return "no spectrum samples";
+
+  const values = points.map((point) => point.rssiDbm);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = Math.max(max - min, 1);
+  const width = 56;
+  const samples = sampleSpectrumPoints(points, width * 2);
+  const cells = [];
+
+  for (let i = 0; i < samples.length; i += 2) {
+    const leftValue = samples[i];
+    const rightValue = samples[Math.min(i + 1, samples.length - 1)];
+    const leftHeight = Math.max(0, Math.min(4, Math.round(((leftValue - min) / span) * 4)));
+    const rightHeight = Math.max(0, Math.min(4, Math.round(((rightValue - min) / span) * 4)));
+    cells.push(renderBrailleCell(leftHeight, rightHeight));
+  }
+
+  const strongest = [...points]
+    .sort((left, right) => right.rssiDbm - left.rssiDbm)
+    .slice(0, Math.min(3, points.length))
+    .map((point, index) => `${index + 1}. ${formatMHz(point.freqMHz, stepKHz)} MHz ${point.rssiDbm.toFixed(1)} dBm`);
+
+  return [
+    `${COLOR.cyan}spectrum${COLOR.reset} ${COLOR.dim}| live preview${COLOR.reset}  sweeps=${sweepCount}`,
+    `${COLOR.blue}range${COLOR.reset}=${formatMHz(points[0].freqMHz, stepKHz)}-${formatMHz(points[points.length - 1].freqMHz, stepKHz)} MHz  ` +
+      `${COLOR.blue}floor${COLOR.reset}=${min.toFixed(1)} dBm  ${COLOR.blue}peak${COLOR.reset}=${max.toFixed(1)} dBm`,
+    `${COLOR.dim}Ctrl+C or 'stop' ends live spectrum mode${COLOR.reset}`,
+    "",
+    `${max.toFixed(1).padStart(6, " ")} dBm  ${cells.join("")}`,
+    `${min.toFixed(1).padStart(6, " ")} dBm  ${" ".repeat(cells.length)}`,
+    `${" ".repeat(8)}${formatMHz(points[0].freqMHz, stepKHz)} MHz${" ".repeat(Math.max(cells.length - 18, 2))}${formatMHz(points[points.length - 1].freqMHz, stepKHz)} MHz`,
+    "",
+    "strongest peaks:",
+    ...strongest,
+  ].join("\n");
+}
+
+function normalizeSpectrumArgs(startMHz, stopMHz, stepKHz, dwellMs, samples, band) {
+  const defaults = getDefaultSpectrumRange(band);
+  const start = Number(startMHz ?? defaults.startMHz);
+  const stop = Number(stopMHz ?? defaults.stopMHz);
+  const step = Number(stepKHz ?? 50);
+  const dwell = Number(dwellMs ?? 20);
+  const sampleCount = Number(samples ?? 3);
+
+  if (!Number.isFinite(start) || !Number.isFinite(stop)) {
+    throw new Error("spectrum frequencies must be valid MHz numbers");
+  }
+  if (!Number.isFinite(step) || step <= 0) {
+    throw new Error("spectrum stepKHz must be greater than 0");
+  }
+  if (!Number.isFinite(dwell) || dwell < 0) {
+    throw new Error("spectrum dwellMs must be 0 or greater");
+  }
+  if (!Number.isInteger(sampleCount) || sampleCount < 1) {
+    throw new Error("spectrum samples must be an integer greater than 0");
+  }
+  if (stop < start) {
+    throw new Error("spectrum stopMHz must be greater than or equal to startMHz");
+  }
+
+  return {
+    startMHz: start,
+    stopMHz: stop,
+    stepKHz: step,
+    dwellMs: dwell,
+    samples: sampleCount,
+    stepMHz: step / 1000,
+  };
+}
+
 function parseLine(line) {
   const tokens = [];
   const matches = line.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
@@ -544,6 +649,7 @@ class RadioShell {
     console.log("  disconnect");
     console.log("  status");
     console.log("  spectrum [startMHz] [stopMHz] [stepKHz] [dwellMs] [samples]");
+    console.log("  spectrum live [startMHz] [stopMHz] [stepKHz] [dwellMs] [samples]");
     console.log("  mode [packet|direct_async] [band] [modulation]");
     console.log("  listen [pollMs]");
     console.log("  listen [silenceGapUs] [sampleRateUs]");
@@ -560,6 +666,7 @@ class RadioShell {
     console.log("examples:");
     console.log("  man listen");
     console.log("  spectrum");
+    console.log("  spectrum live");
     console.log("  mode packet 433 ook");
     console.log("  listen 20");
     console.log("  send aa 55 01");
@@ -638,31 +745,20 @@ class RadioShell {
   async spectrum(startMHz, stopMHz, stepKHz = 50, dwellMs = 20, samples = 3) {
     await this.ensureConnected();
     await this.stop();
+    const config = normalizeSpectrumArgs(
+      startMHz,
+      stopMHz,
+      stepKHz,
+      dwellMs,
+      samples,
+      this.radioConfig.band
+    );
+    const points = await this.collectSpectrumSweep(config);
+    await this.radio.idle();
+    console.log(renderSpectrum(points, config.stepKHz));
+  }
 
-    const defaults = getDefaultSpectrumRange(this.radioConfig.band);
-    const start = Number(startMHz ?? defaults.startMHz);
-    const stop = Number(stopMHz ?? defaults.stopMHz);
-    const step = Number(stepKHz);
-    const dwell = Number(dwellMs);
-    const sampleCount = Number(samples);
-
-    if (!Number.isFinite(start) || !Number.isFinite(stop)) {
-      throw new Error("spectrum frequencies must be valid MHz numbers");
-    }
-    if (!Number.isFinite(step) || step <= 0) {
-      throw new Error("spectrum stepKHz must be greater than 0");
-    }
-    if (!Number.isFinite(dwell) || dwell < 0) {
-      throw new Error("spectrum dwellMs must be 0 or greater");
-    }
-    if (!Number.isInteger(sampleCount) || sampleCount < 1) {
-      throw new Error("spectrum samples must be an integer greater than 0");
-    }
-    if (stop < start) {
-      throw new Error("spectrum stopMHz must be greater than or equal to startMHz");
-    }
-
-    const stepMHz = step / 1000;
+  async collectSpectrumSweep(config) {
     /** @type {{ freqMHz: number, rssiDbm: number }[]} */
     const points = [];
 
@@ -676,33 +772,71 @@ class RadioShell {
       },
     });
 
-    for (let freqMHz = start; freqMHz <= stop + (stepMHz / 2); freqMHz += stepMHz) {
+    for (
+      let freqMHz = config.startMHz;
+      freqMHz <= config.stopMHz + (config.stepMHz / 2);
+      freqMHz += config.stepMHz
+    ) {
       const roundedFreqMHz = Number(freqMHz.toFixed(6));
       await this.radio.idle();
       await this.radio.setFrequencyMHz(roundedFreqMHz);
       await this.radio.enterRxSafe();
 
-      if (dwell > 0) {
-        await sleep(dwell);
+      if (config.dwellMs > 0) {
+        await sleep(config.dwellMs);
       }
 
       let rssiTotal = 0;
-      for (let i = 0; i < sampleCount; i += 1) {
+      for (let i = 0; i < config.samples; i += 1) {
         const rssiRaw = await stableRead(this.radio, STATUS.RSSI);
         rssiTotal += decodeRssi(rssiRaw);
-        if (i + 1 < sampleCount) {
+        if (i + 1 < config.samples) {
           await sleep(2);
         }
       }
 
       points.push({
         freqMHz: roundedFreqMHz,
-        rssiDbm: rssiTotal / sampleCount,
+        rssiDbm: rssiTotal / config.samples,
       });
     }
 
-    await this.radio.idle();
-    console.log(renderSpectrum(points, step));
+    return points;
+  }
+
+  async spectrumLive(startMHz, stopMHz, stepKHz = 50, dwellMs = 20, samples = 3) {
+    await this.ensureConnected();
+    await this.stop();
+
+    const config = normalizeSpectrumArgs(
+      startMHz,
+      stopMHz,
+      stepKHz,
+      dwellMs,
+      samples,
+      this.radioConfig.band
+    );
+
+    const runtime = {
+      active: true,
+      stop: async () => {
+        runtime.active = false;
+        if (this.radio) {
+          await this.radio.idle().catch(() => {});
+        }
+      },
+    };
+
+    this.runtime = runtime;
+    let sweepCount = 0;
+
+    while (runtime.active) {
+      const points = await this.collectSpectrumSweep(config);
+      if (!runtime.active) break;
+      sweepCount += 1;
+      process.stdout.write("\u001b[2J\u001b[H");
+      process.stdout.write(`${renderBrailleSpectrum(points, config.stepKHz, sweepCount)}\n`);
+    }
   }
 
   async startPacketListen(pollMs = 20) {
@@ -931,7 +1065,11 @@ async function executeCommand(shell, line, onExit) {
   } else if (command === "status") {
     await shell.printStatus();
   } else if (command === "spectrum") {
-    await shell.spectrum(subcommand, rest[0], rest[1], rest[2], rest[3]);
+    if (subcommand === "live") {
+      await shell.spectrumLive(rest[0], rest[1], rest[2], rest[3], rest[4]);
+    } else {
+      await shell.spectrum(subcommand, rest[0], rest[1], rest[2], rest[3]);
+    }
   } else if (command === "mode") {
     if (!subcommand) {
       shell.printMode();

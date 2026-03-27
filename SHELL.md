@@ -64,6 +64,7 @@ Defaults:
 - `disconnect`
 - `status`
 - `spectrum [startMHz] [stopMHz] [stepKHz] [dwellMs] [samples]`
+- `spectrum live [startMHz] [stopMHz] [stepKHz] [dwellMs] [samples]`
 - `mode [packet|direct_async] [band] [modulation]`
 - `listen [pollMs]`
 - `listen [silenceGapUs] [sampleRateUs]`
@@ -109,6 +110,8 @@ cc1101> mode direct_async 433 ook
 
 ### `spectrum [startMHz] [stopMHz] [stepKHz] [dwellMs] [samples]`
 
+### `spectrum live [startMHz] [stopMHz] [stepKHz] [dwellMs] [samples]`
+
 Sweeps a frequency range and prints a terminal RSSI spectrum view.
 
 Arguments:
@@ -130,9 +133,12 @@ Examples:
 
 ```text
 cc1101> spectrum
+cc1101> spectrum live
 cc1101> spectrum 433.7 434.2 25 25 5
 cc1101> spectrum 868.0 869.0 100 15 2
 ```
+
+`spectrum live` repeats the sweep continuously and redraws the terminal with braille-style cells for a denser graph. Stop it with `stop` or Ctrl+C.
 
 This is a received-power sweep using RSSI. It is not an IQ capture, waterfall, or protocol decoder.
 
