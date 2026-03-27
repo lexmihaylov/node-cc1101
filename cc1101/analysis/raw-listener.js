@@ -6,12 +6,15 @@ const { STATUS } = require("../constants");
 const { BAND, MODULATION, RADIO_MODE } = require("../profiles");
 const { sleep } = require("../utils");
 const { shouldAcceptTriggerRssi } = require("./rssi-filter");
-const { summarizeFrame } = require("./raw-analysis");
-const { renderSignalSummary } = require("./signal-renderer");
 
 /**
- * @typedef {import("./raw-analysis").RawFrame} RawFrame
- * @typedef {import("./raw-analysis").RawFrameSummary} RawFrameSummary
+ * @typedef {object} RawFrame
+ * @property {string} ts
+ * @property {string} reason
+ * @property {number | null} triggerRssi
+ * @property {number} edges
+ * @property {number[]} durationsUs
+ * @property {number[]} levels
  *
  * @typedef {object} RawListenerOptions
  * @property {number=} bus
@@ -27,7 +30,7 @@ const { renderSignalSummary } = require("./signal-renderer");
  * @property {number=} pollMs
  * @property {number | null=} rssiTolerance
  * @property {(message: string) => void=} onMessage
- * @property {(frame: RawFrame, summary: RawFrameSummary | null) => void=} onFrame
+ * @property {(frame: RawFrame) => void=} onFrame
  */
 
 class CC1101RawListener {
@@ -49,45 +52,14 @@ class CC1101RawListener {
       pollMs: options.pollMs ?? 5,
       rssiTolerance: options.rssiTolerance ?? null,
       onMessage: options.onMessage ?? ((message) => console.log(message)),
-      onFrame: options.onFrame ?? ((frame, summary) => {
+      onFrame: options.onFrame ?? ((frame) => {
         this.options.onMessage("---- raw trigger ----");
         this.options.onMessage(`ts:          ${frame.ts}`);
         this.options.onMessage(`triggerRSSI: ${frame.triggerRssi}`);
         this.options.onMessage(`edges:       ${frame.edges}`);
         this.options.onMessage(`levels:      ${frame.levels.join(",")}`);
         this.options.onMessage(`durations:   ${frame.durationsUs.join(",")}`);
-        for (const line of renderSignalSummary({
-          label: "raw",
-          units: frame.durationsUs,
-          levels: frame.levels,
-          durationsUs: frame.durationsUs,
-        })) {
-          this.options.onMessage(line);
-        }
         this.options.onMessage("");
-
-        if (summary) {
-          this.options.onMessage("---- analyzed frame ----");
-          this.options.onMessage(`ts:          ${summary.ts}`);
-          this.options.onMessage(`triggerRSSI: ${summary.triggerRssi}`);
-          this.options.onMessage(`edges:       ${summary.edges}`);
-          this.options.onMessage(`baseUnit:    ~${summary.baseUnitUs} us`);
-          this.options.onMessage(`units:       ${summary.units.join(",")}`);
-          for (const line of renderSignalSummary({
-            label: "analyzed",
-            units: summary.units,
-          })) {
-            this.options.onMessage(line);
-          }
-
-          summary.segments.forEach((segment, index) => {
-            this.options.onMessage(`segment ${index + 1} units:   ${segment.units.join(",")}`);
-            this.options.onMessage(`segment ${index + 1} symbols: ${segment.symbols}`);
-            this.options.onMessage(`segment ${index + 1} compact: ${segment.compact}`);
-            this.options.onMessage(`segment ${index + 1} bits?:   ${segment.bits}`);
-          });
-          this.options.onMessage("");
-        }
       }),
     };
 
@@ -164,9 +136,8 @@ class CC1101RawListener {
       levels: this.frameBuffer.map((edge) => edge.level),
     };
 
-    const summary = summarizeFrame(frame);
     this.lastAcceptedTriggerRssi = frame.triggerRssi;
-    this.options.onFrame(frame, summary);
+    this.options.onFrame(frame);
 
     this.resetFrameBuffer();
     this.currentTriggerRssi = null;

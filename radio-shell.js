@@ -5,10 +5,6 @@ const readline = require("readline");
 const { CC1101RawListener } = require("./cc1101/analysis/raw-listener");
 const { CC1101StreamRecorder } = require("./cc1101/analysis/stream-recorder");
 const {
-  analyzeRecordedStream,
-  buildStableFramePath,
-} = require("./cc1101/analysis/stream-analysis");
-const {
   loadCaptureFile,
   summarizeCaptureFile,
 } = require("./cc1101/analysis/capture-file");
@@ -16,10 +12,6 @@ const {
   buildReplayFromCapture,
   CC1101WindowReplayer,
 } = require("./cc1101/analysis/window-replay");
-const {
-  decodeByProtocol,
-  quantizeEdges,
-} = require("./cc1101/analysis/protocol-analysis");
 const { CC1101Driver } = require("./cc1101/driver");
 const { STATUS } = require("./cc1101/constants");
 const {
@@ -76,7 +68,7 @@ const MANUALS = {
     "EXAMPLES",
     "  man mode",
     "  man listen",
-    "  man decode",
+    "  man replay",
   ].join("\n"),
   connect: [
     "NAME",
@@ -133,7 +125,7 @@ const MANUALS = {
     "  packet|direct_async",
     "    Selects the operating workflow.",
     "    `packet` is FIFO RX/TX.",
-    "    `direct_async` is GPIO-based OOK listen/record/decode/replay.",
+    "    `direct_async` is GPIO-based OOK listen/record/replay.",
     "  band",
     "    RF band preset. Supported values: 433, 868, 915.",
     "  modulation",
@@ -183,7 +175,7 @@ const MANUALS = {
     "",
     "USAGE",
     "  send <hex-bytes...>",
-    "  send <file> [txDataGpio] [timing] [repeats] [baseUs]",
+    "  send <file> [txDataGpio] [repeats]",
     "",
     "MODE BEHAVIOR",
     "  packet mode",
@@ -193,114 +185,56 @@ const MANUALS = {
     "",
     "OPTIONS",
     "  file",
-    "    Path to a saved frame or capture JSON file.",
+    "    Path to a saved raw stream or raw replay JSON file.",
     "  txDataGpio",
     "    Raspberry Pi output GPIO driving the CC1101 GDO0 TX data input. Default 24.",
-    "  timing",
-    "    Replay timing mode. Supported values: normalized, raw. Default normalized.",
     "  repeats",
     "    Number of transmissions. Default 10.",
-    "  baseUs",
-    "    Optional base timing override used by normalized replay.",
     "",
     "DESCRIPTION",
     "  Use `send` instead of separate TX verbs. In packet mode it writes FIFO data.",
-    "  In direct_async mode it replays a saved waveform-like file.",
+    "  In direct_async mode it replays the saved raw edge timing file.",
   ].join("\n"),
   record: [
     "NAME",
     "  record - capture one continuous direct-async edge stream to a file",
     "",
     "USAGE",
-    "  record <file> [rxDataGpio] [baseUs] [minDtUs]",
+    "  record <file> [rxDataGpio] [minDtUs]",
     "",
     "OPTIONS",
     "  file",
     "    Output JSON file that receives the full recorded edge stream.",
     "  rxDataGpio",
     "    Raspberry Pi input GPIO connected to CC1101 GDO0. Default 24.",
-    "  baseUs",
-    "    Default timing base stored with the recording. Default 400 us.",
     "  minDtUs",
     "    Ignore edges shorter than this many microseconds. Default 80 us.",
     "",
     "DESCRIPTION",
-    "  This does not try to isolate one frame while recording.",
-    "  It stores the raw stream so later analysis can find repeated patterns across multiple clicks.",
+    "  Stores the raw edge stream exactly as seen on the GPIO line.",
+    "  No normalization, snapping, trimming, decoding, or frame extraction is performed.",
     "  While recording, the shell renders a continuously updating sampled live preview over the",
-    "  recent time window, plus timing units and best-effort segment bits when enough data is available.",
+    "  recent time window and shows the most recent raw edge values.",
     "  Finish with `stop`.",
-  ].join("\n"),
-  analyze: [
-    "NAME",
-    "  analyze - offline analysis commands for recorded data",
-    "",
-    "USAGE",
-    "  analyze stream <file> [baseUs] [silenceUnits] [minBurstEdges] [tolerance]",
-    "",
-    "SUBCOMMANDS",
-    "  stream",
-    "    Analyze one recorded edge stream, split it into bursts, cluster repeating patterns,",
-    "    guess likely protocols, and export the best stable frame as *.stable-frame.json.",
-    "",
-    "OPTIONS",
-    "  file",
-    "    Recorded edge stream JSON file produced by `record`.",
-    "  baseUs",
-    "    Optional base timing override used during normalization.",
-    "  silenceUnits",
-    "    Minimum gap length, in timing units, treated as an inter-burst separator. Default 18.",
-    "  minBurstEdges",
-    "    Ignore very short bursts with fewer than this many edges. Default 8.",
-    "  tolerance",
-    "    Unit tolerance when aligning similar bursts. Default 1.",
-  ].join("\n"),
-  decode: [
-    "NAME",
-    "  decode - run a specific protocol decoder against a file",
-    "",
-    "USAGE",
-    "  decode <protocol> <file> [baseUs] [silenceUnits] [minBurstEdges] [tolerance]",
-    "",
-    "OPTIONS",
-    "  protocol",
-    "    Decoder name. Supported values: ev1527_like, pt2262_like, generic_pwm_13, pulse_distance_like.",
-    "  file",
-    "    Input file. May be a stable frame file, a replayable capture file, or a raw recorded stream.",
-    "  baseUs",
-    "    Optional base timing override.",
-    "  silenceUnits",
-    "    Only used when decoding a raw stream first. Inter-burst split threshold. Default 18.",
-    "  minBurstEdges",
-    "    Only used when decoding a raw stream first. Ignore bursts shorter than this. Default 8.",
-    "  tolerance",
-    "    Timing-unit tolerance used by the decoder. Default 1.",
-    "",
-    "DESCRIPTION",
-    "  If the input file is a raw stream, the shell first extracts the best stable frame",
-    "  and then runs the selected decoder.",
   ].join("\n"),
   replay: [
     "NAME",
-    "  replay - transmit a saved frame or capture file through direct async TX",
+    "  replay - transmit a saved raw edge file through direct async TX",
     "",
     "USAGE",
-    "  replay <file> [txDataGpio] [timing] [repeats] [baseUs]",
+    "  replay <file> [txDataGpio] [repeats]",
     "",
     "OPTIONS",
     "  file",
-    "    Saved frame or replayable capture JSON file.",
+    "    Saved raw stream or replayable raw edge JSON file.",
     "  txDataGpio",
     "    Raspberry Pi output GPIO driving CC1101 GDO0 in TX. Default 24.",
-    "  timing",
-    "    raw or normalized. Default normalized.",
     "  repeats",
     "    Number of times to transmit the sequence. Default 10.",
-    "  baseUs",
-    "    Optional normalized replay base timing override.",
     "",
     "DESCRIPTION",
-    "  Stops active work, puts the radio into direct async TX, and bit-bangs the chosen GPIO.",
+    "  Stops active work, puts the radio into direct async TX, and replays the recorded",
+    "  raw edge durations exactly as stored in the file.",
   ].join("\n"),
   show: [
     "NAME",
@@ -423,45 +357,6 @@ async function stableRead(radio, address) {
   return previous;
 }
 
-/**
- * @param {any} capture
- * @param {number | undefined} baseUsOverride
- * @returns {Array<{ level: number, dtUs: number, wallclockMs: number, units?: number }>}
- */
-function toFrameEdges(capture, baseUsOverride) {
-  if (!capture) {
-    throw new Error("missing capture data");
-  }
-
-  if (Array.isArray(capture.edges) && capture.edges.length > 0) {
-    if (capture.edges[0].units !== undefined) {
-      return capture.edges.map((edge, index) => ({
-        level: edge.level,
-        dtUs: edge.dtUs ?? edge.units * Number(baseUsOverride ?? capture.baseUs ?? 400),
-        wallclockMs: edge.wallclockMs ?? index,
-        units: edge.units,
-      }));
-    }
-
-    return capture.edges.map((edge, index) => ({
-      level: edge.level,
-      dtUs: edge.dtUs,
-      wallclockMs: edge.wallclockMs ?? index,
-    }));
-  }
-
-  if (Array.isArray(capture.levels) && Array.isArray(capture.durationsUs)) {
-    return capture.levels.map((level, index) => ({
-      level,
-      dtUs: capture.durationsUs[index],
-      wallclockMs: index,
-      units: Array.isArray(capture.units) ? capture.units[index] : undefined,
-    }));
-  }
-
-  throw new Error("unsupported capture file format");
-}
-
 class RadioShell {
   constructor(options = {}) {
     this.bus = options.bus ?? 0;
@@ -525,11 +420,9 @@ class RadioShell {
     console.log("  mode [packet|direct_async] [band] [modulation]");
     console.log("  listen [pollMs|gpio] [threshold] [captureMs] [rssiTolerance]");
     console.log("  send <hex-bytes...>");
-    console.log("  send <file> [txDataGpio] [timing] [repeats] [baseUs]");
-    console.log("  record <file> [rxDataGpio] [baseUs] [minDtUs]");
-    console.log("  analyze stream <file> [baseUs] [silenceUnits] [minBurstEdges] [tolerance]");
-    console.log("  decode <protocol> <file> [baseUs] [silenceUnits] [minBurstEdges] [tolerance]");
-    console.log("  replay <file> [txDataGpio] [timing] [repeats] [baseUs]");
+    console.log("  send <file> [txDataGpio] [repeats]");
+    console.log("  record <file> [rxDataGpio] [minDtUs]");
+    console.log("  replay <file> [txDataGpio] [repeats]");
     console.log("  show <file>");
     console.log("  stop");
     console.log("  idle");
@@ -543,11 +436,10 @@ class RadioShell {
     console.log("  send aa 55 01");
     console.log("  mode direct_async 433 ook");
     console.log("  listen 24 100 220 6");
-    console.log("  record /tmp/rf-captures/session-001.json 24 400 80");
+    console.log("  record /tmp/rf-captures/session-001.json 24 80");
     console.log("  stop");
-    console.log("  analyze stream /tmp/rf-captures/session-001.json 400 18 8 1");
-    console.log("  decode ev1527_like /tmp/rf-captures/session-001.stable-frame.json");
-    console.log("  replay /tmp/rf-captures/session-001.stable-frame.json 24 normalized 10 400");
+    console.log("  show /tmp/rf-captures/session-001.json");
+    console.log("  replay /tmp/rf-captures/session-001.json 24 10");
   }
 
   printManual(command) {
@@ -561,7 +453,6 @@ class RadioShell {
     const key = String(command).toLowerCase();
     const aliases = {
       exit: "quit",
-      stream: "analyze",
     };
     const resolved = aliases[key] ?? key;
     const manual = MANUALS[resolved];
@@ -674,7 +565,7 @@ class RadioShell {
     );
   }
 
-  async replay(file, txDataGpio = 24, timing = "normalized", repeats = 10, baseUs) {
+  async replay(file, txDataGpio = 24, repeats = 10) {
     if (!file) {
       throw new Error("replay requires a capture file path");
     }
@@ -683,10 +574,7 @@ class RadioShell {
     await this.disconnect();
 
     const capture = loadCaptureFile(file);
-    const replay = buildReplayFromCapture(capture, {
-      mode: timing === "raw" ? "raw" : "normalized",
-      baseUs: baseUs !== undefined ? Number(baseUs) : undefined,
-    });
+    const replay = buildReplayFromCapture(capture);
 
     const replayer = new CC1101WindowReplayer({
       bus: this.bus,
@@ -716,15 +604,15 @@ class RadioShell {
       return;
     }
 
-    const [file, txDataGpio, timing, repeats, baseUs] = args;
+    const [file, txDataGpio, repeats] = args;
     if (!fs.existsSync(String(file))) {
       throw new Error("direct_async send requires a replayable file path");
     }
 
-    await this.replay(file, txDataGpio ?? 24, timing ?? "normalized", repeats ?? 10, baseUs);
+    await this.replay(file, txDataGpio ?? 24, repeats ?? 10);
   }
 
-  async record(file, rxDataGpio = 24, baseUs = 400, minDtUs = 80) {
+  async record(file, rxDataGpio = 24, minDtUs = 80) {
     if (!file) {
       throw new Error("record requires an output file path");
     }
@@ -735,7 +623,7 @@ class RadioShell {
     const renderLiveRecordFrame = (frame) => {
       const header = [
         `${COLOR.cyan}record${COLOR.reset} ${COLOR.dim}| live preview${COLOR.reset}`,
-        `${COLOR.blue}file${COLOR.reset}=${file}  ${COLOR.blue}gpio${COLOR.reset}=${Number(rxDataGpio)}  ${COLOR.blue}baseUs${COLOR.reset}=${Number(baseUs)}  ${COLOR.blue}minDtUs${COLOR.reset}=${Number(minDtUs)}`,
+        `${COLOR.blue}file${COLOR.reset}=${file}  ${COLOR.blue}gpio${COLOR.reset}=${Number(rxDataGpio)}  ${COLOR.blue}minDtUs${COLOR.reset}=${Number(minDtUs)}`,
         `${COLOR.dim}Ctrl+C or 'stop' ends recording and saves the stream${COLOR.reset}`,
         "",
       ].join("\n");
@@ -750,7 +638,6 @@ class RadioShell {
       speedHz: this.speedHz,
       filepath: String(file),
       rxDataGpio: Number(rxDataGpio),
-      baseUs: Number(baseUs),
       minDtUs: Number(minDtUs),
       onMessage: (message) => {
         console.log(`[record] ${message}`);
@@ -761,107 +648,6 @@ class RadioShell {
     });
 
     await this.runtime.start();
-  }
-
-  analyzeStream(file, baseUs, silenceUnits = 18, minBurstEdges = 8, tolerance = 1) {
-    if (!file) {
-      throw new Error("analyze stream requires a stream file path");
-    }
-
-    const stream = loadCaptureFile(file);
-    const exportPath = buildStableFramePath(file);
-    const analysis = analyzeRecordedStream(stream, {
-      baseUs: baseUs !== undefined ? Number(baseUs) : undefined,
-      silenceUnits: Number(silenceUnits),
-      minBurstEdges: Number(minBurstEdges),
-      tolerance: Number(tolerance),
-      exportPath,
-    });
-
-    console.log(JSON.stringify({
-      file,
-      sourceType: analysis.sourceType,
-      edgeCount: analysis.edgeCount,
-      burstCount: analysis.burstCount,
-      timing: analysis.timing,
-      burstCandidates: analysis.bursts.slice(0, 8).map((burst) => ({
-        index: burst.index,
-        edgeCount: burst.edgeCount,
-        tokenCount: burst.tokenCount,
-        topProtocol: burst.rankings[0]?.name ?? null,
-        topScore: burst.rankings[0]?.score ?? null,
-        bars: burst.bars,
-      })),
-      clusters: analysis.clusters.slice(0, 5).map((cluster) => ({
-        index: cluster.index,
-        size: cluster.size,
-        burstIndexes: cluster.burstIndexes,
-        compact: cluster.compact,
-        bars: cluster.bars,
-        topProtocol: cluster.rankings[0]?.name ?? null,
-        topScore: cluster.rankings[0]?.score ?? null,
-        decoded: cluster.decoded,
-      })),
-      best: analysis.best ? {
-        size: analysis.best.size,
-        topProtocol: analysis.best.rankings[0]?.name ?? null,
-        topScore: analysis.best.rankings[0]?.score ?? null,
-        decoded: analysis.best.decoded,
-      } : null,
-      exportPath: analysis.exportPath,
-    }, null, 2));
-  }
-
-  decode(protocol, file, baseUs, silenceUnits = 18, minBurstEdges = 8, tolerance = 1) {
-    if (!protocol || !file) {
-      throw new Error("decode requires <protocol> <file>");
-    }
-
-    const capture = loadCaptureFile(file);
-    let frame;
-
-    if (capture.type === "edge_stream") {
-      const analysis = analyzeRecordedStream(capture, {
-        baseUs: baseUs !== undefined ? Number(baseUs) : undefined,
-        silenceUnits: Number(silenceUnits),
-        minBurstEdges: Number(minBurstEdges),
-        tolerance: Number(tolerance),
-      });
-
-      if (!analysis.best) {
-        throw new Error("no stable frame could be extracted from stream");
-      }
-
-      const bestBaseUs = Number(baseUs ?? capture.baseUs ?? analysis.timing.baseUs);
-      frame = quantizeEdges(
-        analysis.best.frame.map((token, index) => ({
-          level: token.level,
-          dtUs: token.units * bestBaseUs,
-          wallclockMs: index,
-        })),
-        bestBaseUs,
-        false
-      );
-    } else {
-      const frameEdges = toFrameEdges(capture, baseUs !== undefined ? Number(baseUs) : undefined);
-      const resolvedBaseUs = Number(baseUs ?? capture.baseUs ?? 400);
-      frame = frameEdges[0]?.units !== undefined
-        ? frameEdges.map((edge) => ({
-          level: edge.level,
-          dtUs: edge.dtUs,
-          wallclockMs: edge.wallclockMs,
-          snappedUs: edge.dtUs,
-          units: edge.units,
-        }))
-        : quantizeEdges(frameEdges, resolvedBaseUs, false);
-    }
-
-    const decoded = decodeByProtocol(protocol, frame, Number(tolerance));
-    console.log(JSON.stringify({
-      file,
-      protocol,
-      decoded,
-    }, null, 2));
   }
 
   show(file) {
@@ -932,10 +718,6 @@ async function executeCommand(shell, line, onExit) {
     await shell.send([subcommand, ...rest].filter(Boolean));
   } else if (command === "record") {
     await shell.record(subcommand, rest[0], rest[1], rest[2]);
-  } else if (command === "analyze" && subcommand === "stream") {
-    shell.analyzeStream(rest[0], rest[1], rest[2], rest[3], rest[4]);
-  } else if (command === "decode") {
-    shell.decode(subcommand, rest[0], rest[1], rest[2], rest[3], rest[4]);
   } else if (command === "replay") {
     await shell.replay(subcommand, rest[0], rest[1], rest[2], rest[3]);
   } else if (command === "show") {

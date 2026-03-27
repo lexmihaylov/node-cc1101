@@ -4,19 +4,13 @@ const { Gpio } = require("pigpio");
 const { CC1101Driver } = require("../driver");
 const { sleep } = require("../utils");
 const { loadCaptureFile } = require("./capture-file");
-const { renderSignalSummary } = require("./signal-renderer");
 
 /**
- * @typedef {"raw" | "normalized"} ReplayMode
- *
  * @typedef {object} ReplayWindow
- * @property {ReplayMode} mode
- * @property {number} baseUs
  * @property {number} start
  * @property {number} end
  * @property {number[]} levels
  * @property {number[]} durationsUs
- * @property {number[]} units
  *
  * @typedef {object} WindowReplayOptions
  * @property {number=} bus
@@ -41,16 +35,12 @@ function sleepUs(us) {
 /**
  * @param {any} capture
  * @param {{
- *   mode?: ReplayMode,
- *   baseUs?: number,
  *   sliceStart?: number,
  *   sliceEnd?: number
  * }=} options
  * @returns {ReplayWindow}
  */
 function buildReplayFromCapture(capture, options = {}) {
-  const mode = options.mode ?? "normalized";
-  const baseUs = Number(options.baseUs ?? capture.baseUs ?? 400);
   const total = capture.edges?.length ?? capture.levels?.length ?? 0;
   const sliceStart = options.sliceStart ?? 0;
   const sliceEnd = options.sliceEnd ?? (total - 1);
@@ -63,37 +53,29 @@ function buildReplayFromCapture(capture, options = {}) {
 
   const levels = [];
   const durationsUs = [];
-  const units = [];
-
   if (capture.edges && Array.isArray(capture.edges)) {
     for (let i = start; i <= end; i += 1) {
       const edge = capture.edges[i];
       levels.push(edge.level);
-      units.push(edge.units);
-      durationsUs.push(mode === "raw" ? edge.dtUs : (edge.units || 1) * baseUs);
+      durationsUs.push(edge.dtUs);
     }
   } else if (
     Array.isArray(capture.levels) &&
-    Array.isArray(capture.durationsUs) &&
-    Array.isArray(capture.units)
+    Array.isArray(capture.durationsUs)
   ) {
     for (let i = start; i <= end; i += 1) {
       levels.push(capture.levels[i]);
-      units.push(capture.units[i]);
-      durationsUs.push(mode === "raw" ? capture.durationsUs[i] : (capture.units[i] || 1) * baseUs);
+      durationsUs.push(capture.durationsUs[i]);
     }
   } else {
     throw new Error("Unsupported capture file format");
   }
 
   return {
-    mode,
-    baseUs,
     start,
     end,
     levels,
     durationsUs,
-    units,
   };
 }
 
@@ -133,20 +115,12 @@ class CC1101WindowReplayer {
       await radio.startDirectAsyncTx();
 
       this.options.onMessage(`txDataGpio:    ${this.options.txDataGpio}`);
-      this.options.onMessage(`mode:          ${replay.mode}`);
-      this.options.onMessage(`baseUs:        ${replay.baseUs}`);
       this.options.onMessage(`slice:         ${replay.start}..${replay.end}`);
       this.options.onMessage(`steps:         ${replay.durationsUs.length}`);
       this.options.onMessage(`repeats:       ${this.options.repeats}`);
       this.options.onMessage(`repeatGapUs:   ${this.options.repeatGapUs}`);
-      for (const line of renderSignalSummary({
-        label: "replay",
-        units: replay.units,
-        levels: replay.levels,
-        durationsUs: replay.durationsUs,
-      })) {
-        this.options.onMessage(line);
-      }
+      this.options.onMessage(`levels:        ${replay.levels.join(",")}`);
+      this.options.onMessage(`durationsUs:   ${replay.durationsUs.join(",")}`);
       this.options.onMessage("");
 
       if (this.options.preDelayMs > 0) {

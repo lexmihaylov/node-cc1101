@@ -4,25 +4,25 @@ Node.js CC1101 library and Raspberry Pi RF toolkit for 433/868/915 MHz over SPI 
 
 This project has two parts:
 
-- A reusable CC1101 driver and radio configuration library under [`cc1101/`](/home/lex/projects/node-cc1101/cc1101)
-- An interactive shell in [`radio-shell.js`](/home/lex/projects/node-cc1101/radio-shell.js) for listening, recording, decoding, and replaying signals
+- a reusable CC1101 driver and radio configuration library under [`cc1101/`](/home/lex/projects/node-cc1101/cc1101)
+- an interactive shell in [`radio-shell.js`](/home/lex/projects/node-cc1101/radio-shell.js) for packet RX/TX, raw direct-async edge listening, raw stream recording, and raw replay
 
 ## Features
 
 - SPI driver for CC1101 register access, strobes, FIFO RX/TX, and status reads
-- High-level radio configuration with `configureRadio(...)`
-- Packet mode helpers for RX/TX
-- Direct async mode helpers for raw OOK work
-- Stream-first analysis modules for recording, clustering repeating patterns, decoding likely protocols, and replay
-- Interactive shell for RF exploration on Raspberry Pi
-- JSDoc types throughout the library for editor completion and TypeScript inference
+- high-level radio configuration with `configureRadio(...)`
+- packet mode helpers for RX/TX
+- direct async mode helpers for raw OOK work
+- raw edge listener for direct async RX
+- raw stream recorder with continuous live preview
+- raw replay through a Raspberry Pi GPIO driving CC1101 `GDO0` in TX
 
 ## Requirements
 
 - Raspberry Pi with SPI enabled
 - CC1101 module wired to Raspberry Pi SPI pins
 - Node.js 18+
-- Native build support required by `pigpio` and `spi-device`
+- native build support required by `pigpio` and `spi-device`
 
 ## Install
 
@@ -53,17 +53,17 @@ Minimum SPI wiring:
 - `MISO` -> Pi `SPI0_MISO`
 - `CSN` -> Pi `SPI0_CE0` or `SPI0_CE1`
 
-Typical GPIO wiring for direct async / analysis:
+Typical GPIO wiring for direct async work:
 
-- `GDO0` -> a Pi GPIO input, commonly `GPIO24`
-- `GDO2` -> a Pi GPIO input, commonly `GPIO25`
+- `GDO0` -> a Pi GPIO input for RX, commonly `GPIO24`
+- `GDO2` -> optional Pi GPIO input for status/observation, commonly `GPIO25`
 
-The shell defaults assume:
+Direct async wiring model:
 
-- SPI bus `0`
-- SPI device `0`
-- `GDO0 = GPIO24`
-- `GDO2 = GPIO25`
+- RX/listen/record: `CC1101 GDO0 async-data output -> Raspberry Pi input GPIO`
+- TX/replay: `Raspberry Pi output GPIO -> CC1101 GDO0 async TX data input`
+
+These are opposite directions on the same CC1101 data pin. Run one mode at a time.
 
 ## Library usage
 
@@ -135,23 +135,6 @@ await radio.startDirectAsyncRx({
 });
 ```
 
-### Raw register configuration
-
-You can still configure with register names:
-
-```js
-const { VALUE } = require("node-cc1101");
-
-await radio.configureObject({
-  preset: {
-    IOCFG0: VALUE.IOCFG.ASYNC_SERIAL_DATA,
-  },
-  registers: {
-    PKTLEN: 61,
-  },
-});
-```
-
 ## Shell
 
 Start the shell:
@@ -168,17 +151,11 @@ cc1101> listen 20
 cc1101> send aa 55 01
 
 cc1101> mode direct_async 433 ook
-cc1101> record /tmp/rf-captures/session-001.json 24 400 80
+cc1101> record /tmp/rf-captures/session-001.json 24 80
 cc1101> stop
-cc1101> analyze stream /tmp/rf-captures/session-001.json 400 18 8 1
-cc1101> decode ev1527_like /tmp/rf-captures/session-001.stable-frame.json
-cc1101> replay /tmp/rf-captures/session-001.stable-frame.json 24 normalized 10 400
+cc1101> show /tmp/rf-captures/session-001.json
+cc1101> replay /tmp/rf-captures/session-001.json 24 10
 ```
-
-Direct async wiring model:
-
-- RX/listen/record: `CC1101 GDO0 async-data output -> Raspberry Pi input GPIO`
-- TX/replay: `Raspberry Pi output GPIO -> CC1101 GDO0 async TX data input`
 
 ### Main shell commands
 
@@ -189,33 +166,25 @@ Direct async wiring model:
 - `mode [packet|direct_async] [band] [modulation]`
 - `listen [pollMs|gpio] [threshold] [captureMs] [rssiTolerance]`
 - `send <hex-bytes...>`
-- `send <file> [txDataGpio] [timing] [repeats] [baseUs]`
-- `record <file> [rxDataGpio] [baseUs] [minDtUs]`
-- `analyze stream <file> [baseUs] [silenceUnits] [minBurstEdges] [tolerance]`
-- `decode <protocol> <file> [baseUs] [silenceUnits] [minBurstEdges] [tolerance]`
-- `replay <file> [txDataGpio] [timing] [repeats] [baseUs]`
+- `send <file> [txDataGpio] [repeats]`
+- `record <file> [rxDataGpio] [minDtUs]`
+- `replay <file> [txDataGpio] [repeats]`
 - `show <file>`
 - `stop`
 - `idle`
 
-Supported decoder names currently include:
-
-- `ev1527_like`
-- `pt2262_like`
-- `generic_pwm_13`
-- `pulse_distance_like`
-
-Detailed shell documentation is available in [SHELL.md](/home/lex/projects/node-cc1101/SHELL.md).
-
-The shell also includes a built-in manual:
+The shell includes a built-in manual:
 
 ```text
 cc1101> man
 cc1101> man listen
-cc1101> man decode
+cc1101> man record
+cc1101> man replay
 ```
 
-During `record`, the shell renders a continuously updating sampled live preview over the recent time window, along with quantized timing units and best-effort segment bits while still saving the full raw stream.
+During `record`, the shell renders a continuously updating sampled live preview over the recent time window and shows raw edge transitions as `level@dtUs`.
+
+Detailed shell documentation is available in [SHELL.md](/home/lex/projects/node-cc1101/SHELL.md).
 
 ## Project structure
 
@@ -223,15 +192,17 @@ During `record`, the shell renders a continuously updating sampled live preview 
 - [`cc1101/driver.js`](/home/lex/projects/node-cc1101/cc1101/driver.js): low-level SPI driver and high-level radio helpers
 - [`cc1101/profiles.js`](/home/lex/projects/node-cc1101/cc1101/profiles.js): presets, config validation, and config translation
 - [`cc1101/constants.js`](/home/lex/projects/node-cc1101/cc1101/constants.js): register, strobe, status, and descriptive value enums
-- [`cc1101/analysis/`](/home/lex/projects/node-cc1101/cc1101/analysis): reusable analysis and replay modules
+- [`cc1101/analysis/raw-listener.js`](/home/lex/projects/node-cc1101/cc1101/analysis/raw-listener.js): RSSI-triggered raw edge capture
+- [`cc1101/analysis/stream-recorder.js`](/home/lex/projects/node-cc1101/cc1101/analysis/stream-recorder.js): continuous raw edge recording with live preview
+- [`cc1101/analysis/window-replay.js`](/home/lex/projects/node-cc1101/cc1101/analysis/window-replay.js): raw replay through GPIO
 - [`radio-shell.js`](/home/lex/projects/node-cc1101/radio-shell.js): interactive CLI shell
 
 ## Notes
 
-- Packet mode and direct async mode are intentionally separate in the API.
-- Direct async mode in this project is aimed primarily at OOK analysis workflows.
-- Timing-sensitive replay in Node.js is still subject to Linux scheduling jitter.
-- Hardware behavior depends on the specific CC1101 board, antenna, voltage level, and GPIO wiring.
+- packet mode and direct async mode are intentionally separate in the API
+- direct async mode in this project is aimed primarily at raw OOK edge work
+- no normalization, snapping, trimming, frame extraction, or protocol decoding is performed in the current shell workflow
+- timing-sensitive replay in Node.js is still subject to Linux scheduling jitter
 
 ## Validation
 

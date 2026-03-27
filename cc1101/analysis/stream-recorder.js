@@ -7,8 +7,6 @@ const { CC1101Driver } = require("../driver");
 const { BAND, MODULATION, RADIO_MODE } = require("../profiles");
 const { VALUE } = require("../constants");
 const { saveCaptureFile } = require("./capture-file");
-const { summarizeFrame, renderBars } = require("./raw-analysis");
-const { renderSignalSummary } = require("./signal-renderer");
 
 /**
  * @typedef {object} StreamRecorderOptions
@@ -17,7 +15,6 @@ const { renderSignalSummary } = require("./signal-renderer");
  * @property {number=} speedHz
  * @property {number=} rxDataGpio
  * @property {number=} minDtUs
- * @property {number=} baseUs
  * @property {number=} previewIntervalMs
  * @property {number=} previewEdgeWindow
  * @property {number=} previewWindowMs
@@ -41,7 +38,6 @@ const { renderSignalSummary } = require("./signal-renderer");
  * @property {number} edgeCount
  * @property {number} rxDataGpio
  * @property {number} minDtUs
- * @property {number} baseUs
  * @property {string} band
  * @property {string} modulation
  * @property {string} mode
@@ -59,9 +55,8 @@ class CC1101StreamRecorder {
       speedHz: options.speedHz ?? 100000,
       rxDataGpio: options.rxDataGpio ?? 24,
       minDtUs: options.minDtUs ?? 80,
-      baseUs: options.baseUs ?? 400,
       previewIntervalMs: options.previewIntervalMs ?? 120,
-      previewEdgeWindow: options.previewEdgeWindow ?? 48,
+      previewEdgeWindow: options.previewEdgeWindow ?? 16,
       previewWindowMs: options.previewWindowMs ?? 2400,
       previewSampleMs: options.previewSampleMs ?? 25,
       filepath: options.filepath ?? "/tmp/rf-stream.json",
@@ -75,7 +70,6 @@ class CC1101StreamRecorder {
     this.lastTick = 0;
     this.startedAtMs = 0;
     this.previewTimer = null;
-    this.lastPreviewCount = 0;
     /** @type {RecordedStreamEdge[]} */
     this.edges = [];
   }
@@ -90,7 +84,7 @@ class CC1101StreamRecorder {
     const samples = new Array(bucketCount).fill(null).map(() => ({
       hits: 0,
       level: null,
-      maxUnits: 0,
+      maxDtUs: 0,
     }));
     const startMs = now - this.options.previewWindowMs;
 
@@ -102,7 +96,7 @@ class CC1101StreamRecorder {
       const bucket = samples[index];
       bucket.hits += 1;
       bucket.level = edge.level;
-      bucket.maxUnits = Math.max(bucket.maxUnits, Math.max(1, Math.round(edge.dtUs / this.options.baseUs)));
+      bucket.maxDtUs = Math.max(bucket.maxDtUs, edge.dtUs);
     }
 
     const activity = samples.map((bucket) => {
@@ -118,69 +112,39 @@ class CC1101StreamRecorder {
       return bucket.level ? "▀" : "▄";
     }).join("");
 
-    const size = samples.map((bucket) => {
+    const span = samples.map((bucket) => {
       if (bucket.hits === 0) return " ";
-      if (bucket.maxUnits <= 1) return "s";
-      if (bucket.maxUnits <= 3) return "m";
-      if (bucket.maxUnits <= 6) return "l";
-      return "x";
+      if (bucket.maxDtUs < 250) return ".";
+      if (bucket.maxDtUs < 750) return ":";
+      if (bucket.maxDtUs < 2000) return "*";
+      return "#";
     }).join("");
 
     return [
       `time:   ${activity}`,
       `level:  ${level}`,
-      `scale:  ${size}`,
-      `legend: activity[ . : * # ]  size[ s m l x ]  sample=${this.options.previewSampleMs}ms  span=${this.options.previewWindowMs}ms`,
+      `dt:     ${span}`,
+      `legend: activity[ . : * # ]  dt[ . <250us | : <750us | * <2000us | # >=2000us ]  sample=${this.options.previewSampleMs}ms  span=${this.options.previewWindowMs}ms`,
     ].join("\n");
   }
 
   emitPreview() {
     const now = Date.now();
     const recent = this.edges.filter((edge) => edge.wallclockMs >= now - this.options.previewWindowMs);
-    this.lastPreviewCount = this.edges.length;
     const recentTail = recent.slice(-this.options.previewEdgeWindow);
-    const tailLevels = recentTail.map((edge) => edge.level);
-    const tailDurationsUs = recentTail.map((edge) => edge.dtUs);
-    const tailUnits = tailDurationsUs.map((duration) => Math.max(1, Math.round(duration / this.options.baseUs)));
     const lines = [
       `preview totalEdges=${this.edges.length} recentEdges=${recent.length} recentTail=${recentTail.length}`,
       this.renderSampledRaster(recent, now),
     ];
 
     if (recentTail.length === 0) {
-      lines.push("wave:   ");
-      lines.push("class:  ");
-      lines.push("unit:   ");
+      lines.push("edges:  ");
       lines.push("note:   no edges in preview window");
       this.options.onPreview(lines.join("\n"));
       return;
     }
 
-    const frame = {
-      ts: new Date().toISOString(),
-      reason: "preview",
-      triggerRssi: null,
-      edges: recentTail.length,
-      durationsUs: tailDurationsUs,
-      levels: tailLevels,
-    };
-    const summary = summarizeFrame(frame);
-    lines.push(
-      ...renderSignalSummary({
-        label: "preview",
-        units: tailUnits,
-        levels: tailLevels,
-        durationsUs: tailDurationsUs,
-        maxSteps: 24,
-      })
-    );
-
-    if (summary) {
-      lines.push(`raster: ${renderBars(summary.units, 48)}`);
-      for (const [index, segment] of summary.segments.slice(0, 2).entries()) {
-        lines.push(`seg${index + 1}: units=${segment.units.join(",")} bits=${segment.bits} compact=${segment.compact}`);
-      }
-    }
+    lines.push(`edges:  ${recentTail.map((edge) => `${edge.level}@${edge.dtUs}`).join("  ")}`);
 
     this.options.onPreview(lines.join("\n"));
   }
@@ -218,7 +182,6 @@ class CC1101StreamRecorder {
     this.stopping = false;
     this.lastTick = 0;
     this.startedAtMs = Date.now();
-    this.lastPreviewCount = 0;
     this.edges = [];
 
     this.radio = new CC1101Driver({
@@ -250,7 +213,7 @@ class CC1101StreamRecorder {
     this.rxDataPin.on("alert", (level, tick) => this.handleAlert(level, tick));
     this.previewTimer = setInterval(() => this.emitPreview(), this.options.previewIntervalMs);
     this.options.onMessage(
-      `recording stream rxDataGpio=${this.options.rxDataGpio} minDtUs=${this.options.minDtUs} baseUs=${this.options.baseUs} file=${this.options.filepath}`
+      `recording stream rxDataGpio=${this.options.rxDataGpio} minDtUs=${this.options.minDtUs} file=${this.options.filepath}`
     );
     this.options.onMessage("use `stop` to finish and save the stream");
   }
@@ -294,7 +257,6 @@ class CC1101StreamRecorder {
       edgeCount: this.edges.length,
       rxDataGpio: this.options.rxDataGpio,
       minDtUs: this.options.minDtUs,
-      baseUs: this.options.baseUs,
       band: BAND.MHZ_433,
       modulation: MODULATION.OOK,
       mode: RADIO_MODE.DIRECT_ASYNC,

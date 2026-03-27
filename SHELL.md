@@ -2,21 +2,13 @@
 
 This document covers the interactive shell in [`radio-shell.js`](/home/lex/projects/node-cc1101/radio-shell.js).
 
-The shell is intentionally small. It focuses on:
+The shell is intentionally small and raw-data oriented. It focuses on:
 
 - packet RX/TX
-- direct async listening
-- recording raw edge streams
-- extracting stable repeating frames from a stream
-- decoding likely protocol payloads
-- replaying a saved frame
-
-Supported decoder names currently include:
-
-- `ev1527_like`
-- `pt2262_like`
-- `generic_pwm_13`
-- `pulse_distance_like`
+- direct async raw edge listening
+- continuous raw stream recording
+- continuously updating live preview during recording
+- raw replay through direct async TX
 
 ## Start
 
@@ -51,7 +43,7 @@ The shell works in two radio modes:
 - `packet`
   FIFO RX/TX traffic.
 - `direct_async`
-  GPIO-driven OOK workflows: listen, record, analyze, decode, replay.
+  GPIO-based raw OOK workflows: listen, record, replay.
 
 Only one active runtime runs at a time. Starting `listen`, `record`, or `replay` stops the previous runtime first.
 
@@ -72,11 +64,9 @@ Defaults:
 - `mode [packet|direct_async] [band] [modulation]`
 - `listen [pollMs|gpio] [threshold] [captureMs] [rssiTolerance]`
 - `send <hex-bytes...>`
-- `send <file> [txDataGpio] [timing] [repeats] [baseUs]`
-- `record <file> [rxDataGpio] [baseUs] [minDtUs]`
-- `analyze stream <file> [baseUs] [silenceUnits] [minBurstEdges] [tolerance]`
-- `decode <protocol> <file> [baseUs] [silenceUnits] [minBurstEdges] [tolerance]`
-- `replay <file> [txDataGpio] [timing] [repeats] [baseUs]`
+- `send <file> [txDataGpio] [repeats]`
+- `record <file> [rxDataGpio] [minDtUs]`
+- `replay <file> [txDataGpio] [repeats]`
 - `show <file>`
 - `stop`
 - `idle`
@@ -94,10 +84,9 @@ Examples:
 ```text
 cc1101> man
 cc1101> man listen
+cc1101> man record
 cc1101> man replay
 ```
-
-Without arguments it lists the available manual entries. With a command name it prints detailed usage, mode-specific behavior, and explanations for each option.
 
 ### `mode [packet|direct_async] [band] [modulation]`
 
@@ -116,7 +105,7 @@ cc1101> mode direct_async 433 ook
 Mode-sensitive listen command:
 
 - in `packet` mode, starts FIFO packet RX polling
-- in `direct_async` mode, starts a raw OOK edge listener on the chosen GPIO
+- in `direct_async` mode, starts an RSSI-triggered raw edge listener on the chosen GPIO
 
 Examples:
 
@@ -133,7 +122,7 @@ cc1101> listen 24 100 220 6
 Mode-sensitive send command:
 
 - in `packet` mode, accepts payload bytes
-- in `direct_async` mode, accepts a replayable frame/capture file and forwards to the replay path
+- in `direct_async` mode, accepts a saved raw edge file and forwards to replay
 
 Examples:
 
@@ -142,60 +131,55 @@ cc1101> mode packet 433 ook
 cc1101> send aa 55 01
 
 cc1101> mode direct_async 433 ook
-cc1101> send /tmp/rf-captures/session-001.stable-frame.json 24 normalized 10 400
+cc1101> send /tmp/rf-captures/session-001.json 24 10
 ```
 
-### `record <file> [rxDataGpio] [baseUs] [minDtUs]`
+### `record <file> [rxDataGpio] [minDtUs]`
 
-Records a continuous direct-async edge stream to one JSON file. Use this when you want multiple clicks or presses in one recording and want to extract repeating patterns later.
+Records a continuous raw direct-async edge stream to one JSON file.
 
-While recording, the shell renders a continuously updating sampled live preview over the recent time window, along with quantized timing units and best-effort segment bits when enough recent data is available.
+Arguments:
+
+- `file`: output JSON file
+- `rxDataGpio`: Raspberry Pi input GPIO connected to CC1101 `GDO0`, default `24`
+- `minDtUs`: ignore edges shorter than this threshold, default `80`
+
+While recording, the shell renders a continuously updating sampled live preview over the recent time window. The preview shows:
+
+- sampled activity over time
+- sampled level over time
+- rough raw duration class over time
+- most recent raw edge values as `level@dtUs`
+
+No snapping, normalization, trimming, decoding, or frame extraction is performed.
 
 Example:
 
 ```text
 cc1101> mode direct_async 433 ook
-cc1101> record /tmp/rf-captures/session-001.json 24 400 80
+cc1101> record /tmp/rf-captures/session-001.json 24 80
 cc1101> stop
 ```
 
-### `analyze stream <file> [baseUs] [silenceUnits] [minBurstEdges] [tolerance]`
+### `replay <file> [txDataGpio] [repeats]`
 
-Loads a recorded stream, splits it into bursts, clusters repeating patterns, guesses a likely protocol, and writes the best stable frame to a sidecar file ending in `.stable-frame.json`.
+Replays a saved raw edge file through the Raspberry Pi GPIO line that feeds the CC1101 async TX data input.
 
-Example:
+Arguments:
 
-```text
-cc1101> analyze stream /tmp/rf-captures/session-001.json 400 18 8 1
-```
-
-### `decode <protocol> <file> [baseUs] [silenceUnits] [minBurstEdges] [tolerance]`
-
-Runs a specific protocol decoder against either:
-
-- a stable frame file
-- a replayable capture file
-- a raw recorded stream, in which case the shell first extracts the best stable frame
+- `file`: saved raw edge JSON file
+- `txDataGpio`: Raspberry Pi output GPIO driving CC1101 `GDO0` in TX, default `24`
+- `repeats`: number of times to transmit the sequence, default `10`
 
 Example:
 
 ```text
-cc1101> decode ev1527_like /tmp/rf-captures/session-001.stable-frame.json
-```
-
-### `replay <file> [txDataGpio] [timing] [repeats] [baseUs]`
-
-Replays a saved frame or capture file through the Raspberry Pi GPIO line that feeds the CC1101 async TX data input.
-
-Example:
-
-```text
-cc1101> replay /tmp/rf-captures/session-001.stable-frame.json 24 normalized 10 400
+cc1101> replay /tmp/rf-captures/session-001.json 24 10
 ```
 
 ### `show <file>`
 
-Prints a summary of a saved stream, frame, or capture file.
+Prints a short summary of a saved JSON file.
 
 ### `stop`
 
@@ -209,11 +193,10 @@ Stops active work and sends the radio to IDLE.
 
 ```text
 cc1101> mode direct_async 433 ook
-cc1101> record /tmp/rf-captures/session-001.json 24 400 80
+cc1101> record /tmp/rf-captures/session-001.json 24 80
 cc1101> stop
-cc1101> analyze stream /tmp/rf-captures/session-001.json 400 18 8 1
-cc1101> decode ev1527_like /tmp/rf-captures/session-001.stable-frame.json
-cc1101> replay /tmp/rf-captures/session-001.stable-frame.json 24 normalized 10 400
+cc1101> show /tmp/rf-captures/session-001.json
+cc1101> replay /tmp/rf-captures/session-001.json 24 10
 ```
 
 Direct async wiring model:
