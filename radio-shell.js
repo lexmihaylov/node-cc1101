@@ -117,6 +117,35 @@ const MANUALS = {
     "  Useful for confirming whether the radio is in IDLE, RX, or TX and whether",
     "  FIFO activity looks sane.",
   ].join("\n"),
+  spectrum: [
+    "NAME",
+    "  spectrum - sweep a frequency range and render RSSI bars",
+    "",
+    "USAGE",
+    "  spectrum [startMHz] [stopMHz] [stepKHz] [dwellMs] [samples]",
+    "",
+    "OPTIONS",
+    "  startMHz",
+    "    Sweep start frequency in MHz. Defaults to a small range around the current band.",
+    "  stopMHz",
+    "    Sweep stop frequency in MHz. Defaults to a small range around the current band.",
+    "  stepKHz",
+    "    Frequency step size in kHz. Default 50.",
+    "  dwellMs",
+    "    Time to wait after each retune before sampling RSSI. Default 20 ms.",
+    "  samples",
+    "    Number of RSSI reads averaged at each point. Default 3.",
+    "",
+    "DESCRIPTION",
+    "  Tunes the radio across the requested range, measures RSSI at each step,",
+    "  and prints a terminal spectrum view using the current band/modulation preset.",
+    "  This is a received-power sweep, not an IQ or waterfall display.",
+    "",
+    "EXAMPLES",
+    "  spectrum",
+    "  spectrum 433.7 434.2 25 25 5",
+    "  spectrum 868.0 869.0 100 15 2",
+  ].join("\n"),
   mode: [
     "NAME",
     "  mode - show or update the shell radio mode configuration",
@@ -349,6 +378,54 @@ function decodeRssi(raw) {
   return (value / 2) - 74;
 }
 
+function getDefaultSpectrumRange(band) {
+  const ranges = {
+    [BAND.MHZ_315]: { startMHz: 314, stopMHz: 316 },
+    [BAND.MHZ_433]: { startMHz: 433.0, stopMHz: 435.0 },
+    [BAND.MHZ_868]: { startMHz: 867.0, stopMHz: 869.0 },
+    [BAND.MHZ_915]: { startMHz: 914.0, stopMHz: 916.0 },
+  };
+
+  return ranges[band] ?? ranges[BAND.MHZ_433];
+}
+
+function formatMHz(value, stepKHz = 50) {
+  const decimals = stepKHz < 100 ? 3 : stepKHz < 1000 ? 2 : 1;
+  return Number(value).toFixed(decimals);
+}
+
+function renderSpectrum(points, stepKHz) {
+  if (!points.length) return "no spectrum samples";
+
+  const values = points.map((point) => point.rssiDbm);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = Math.max(max - min, 1);
+  const width = 48;
+
+  const lines = points.map((point) => {
+    const normalized = (point.rssiDbm - min) / span;
+    const barLength = Math.max(1, Math.round(normalized * width));
+    const bar = "#".repeat(barLength);
+    return `${formatMHz(point.freqMHz, stepKHz).padStart(8, " ")} MHz | ${bar.padEnd(width, " ")} ${point.rssiDbm.toFixed(1).padStart(6, " ")} dBm`;
+  });
+
+  const peaks = [...points]
+    .sort((left, right) => right.rssiDbm - left.rssiDbm)
+    .slice(0, Math.min(3, points.length))
+    .map((point, index) => `${index + 1}. ${formatMHz(point.freqMHz, stepKHz)} MHz ${point.rssiDbm.toFixed(1)} dBm`);
+
+  return [
+    `range ${formatMHz(points[0].freqMHz, stepKHz)}-${formatMHz(points[points.length - 1].freqMHz, stepKHz)} MHz  samples=${points.length}`,
+    `floor ${min.toFixed(1)} dBm  peak ${max.toFixed(1)} dBm`,
+    "",
+    ...lines,
+    "",
+    "strongest peaks:",
+    ...peaks,
+  ].join("\n");
+}
+
 function parseLine(line) {
   const tokens = [];
   const matches = line.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
@@ -466,6 +543,7 @@ class RadioShell {
     console.log("  connect [bus] [device] [speedHz]");
     console.log("  disconnect");
     console.log("  status");
+    console.log("  spectrum [startMHz] [stopMHz] [stepKHz] [dwellMs] [samples]");
     console.log("  mode [packet|direct_async] [band] [modulation]");
     console.log("  listen [pollMs]");
     console.log("  listen [silenceGapUs] [sampleRateUs]");
@@ -481,6 +559,7 @@ class RadioShell {
     console.log("");
     console.log("examples:");
     console.log("  man listen");
+    console.log("  spectrum");
     console.log("  mode packet 433 ook");
     console.log("  listen 20");
     console.log("  send aa 55 01");
@@ -554,6 +633,76 @@ class RadioShell {
     console.log(`PKTSTATUS: 0x${pktstatus.toString(16).padStart(2, "0")}`);
     console.log(`RXBYTES  : ${rxbytes & 0x7f}`);
     console.log(`TXBYTES  : ${txbytes & 0x7f}`);
+  }
+
+  async spectrum(startMHz, stopMHz, stepKHz = 50, dwellMs = 20, samples = 3) {
+    await this.ensureConnected();
+    await this.stop();
+
+    const defaults = getDefaultSpectrumRange(this.radioConfig.band);
+    const start = Number(startMHz ?? defaults.startMHz);
+    const stop = Number(stopMHz ?? defaults.stopMHz);
+    const step = Number(stepKHz);
+    const dwell = Number(dwellMs);
+    const sampleCount = Number(samples);
+
+    if (!Number.isFinite(start) || !Number.isFinite(stop)) {
+      throw new Error("spectrum frequencies must be valid MHz numbers");
+    }
+    if (!Number.isFinite(step) || step <= 0) {
+      throw new Error("spectrum stepKHz must be greater than 0");
+    }
+    if (!Number.isFinite(dwell) || dwell < 0) {
+      throw new Error("spectrum dwellMs must be 0 or greater");
+    }
+    if (!Number.isInteger(sampleCount) || sampleCount < 1) {
+      throw new Error("spectrum samples must be an integer greater than 0");
+    }
+    if (stop < start) {
+      throw new Error("spectrum stopMHz must be greater than or equal to startMHz");
+    }
+
+    const stepMHz = step / 1000;
+    /** @type {{ freqMHz: number, rssiDbm: number }[]} */
+    const points = [];
+
+    await this.radio.configureRadio({
+      ...this.radioConfig,
+      mode: RADIO_MODE.PACKET,
+      packet: {
+        appendStatus: false,
+        lengthMode: PACKET_LENGTH_MODE.FIXED,
+        length: 1,
+      },
+    });
+
+    for (let freqMHz = start; freqMHz <= stop + (stepMHz / 2); freqMHz += stepMHz) {
+      const roundedFreqMHz = Number(freqMHz.toFixed(6));
+      await this.radio.idle();
+      await this.radio.setFrequencyMHz(roundedFreqMHz);
+      await this.radio.enterRxSafe();
+
+      if (dwell > 0) {
+        await sleep(dwell);
+      }
+
+      let rssiTotal = 0;
+      for (let i = 0; i < sampleCount; i += 1) {
+        const rssiRaw = await stableRead(this.radio, STATUS.RSSI);
+        rssiTotal += decodeRssi(rssiRaw);
+        if (i + 1 < sampleCount) {
+          await sleep(2);
+        }
+      }
+
+      points.push({
+        freqMHz: roundedFreqMHz,
+        rssiDbm: rssiTotal / sampleCount,
+      });
+    }
+
+    await this.radio.idle();
+    console.log(renderSpectrum(points, step));
   }
 
   async startPacketListen(pollMs = 20) {
@@ -781,6 +930,8 @@ async function executeCommand(shell, line, onExit) {
     console.log("disconnected");
   } else if (command === "status") {
     await shell.printStatus();
+  } else if (command === "spectrum") {
+    await shell.spectrum(subcommand, rest[0], rest[1], rest[2], rest[3]);
   } else if (command === "mode") {
     if (!subcommand) {
       shell.printMode();

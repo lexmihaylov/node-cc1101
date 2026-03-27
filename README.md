@@ -17,6 +17,7 @@ This project has two parts:
 - raw edge listener for direct async RX
 - raw stream recorder with continuous live preview
 - raw replay through a Raspberry Pi GPIO driving CC1101 `GDO0` in TX
+- terminal spectrum sweep view using RSSI across a frequency range
 
 ## Requirements
 
@@ -177,6 +178,7 @@ cc1101> replay /tmp/rf-captures/session-001.json 0 10000 250 10 false
 - `disconnect`
 - `man [command]`
 - `status`
+- `spectrum [startMHz] [stopMHz] [stepKHz] [dwellMs] [samples]`
 - `mode [packet|direct_async] [band] [modulation]`
 - `listen [pollMs]`
 - `listen [silenceGapUs] [sampleRateUs]`
@@ -198,7 +200,17 @@ cc1101> man
 cc1101> man listen
 cc1101> man record
 cc1101> man replay
+cc1101> man spectrum
 ```
+
+The `spectrum` command sweeps the radio across a range, samples RSSI at each point, and renders a terminal bar chart. For example:
+
+```text
+cc1101> spectrum
+cc1101> spectrum 433.7 434.2 25 25 5
+```
+
+This is a received-power sweep view, not an IQ or waterfall analyzer.
 
 During `record`, the shell renders a continuously updating sampled live preview over the recent time window and shows raw edge transitions as `level@dtUs`. Every observed edge is recorded; no duration threshold is applied.
 

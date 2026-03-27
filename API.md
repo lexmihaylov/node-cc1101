@@ -44,6 +44,7 @@ Common methods:
 - `readFifoPacket()`
 - `getChipInfo()`
 - `verifyChip()`
+- `setFrequencyMHz(freqMHz)`
 
 The implementation lives in [`cc1101/driver.js`](/home/lex/projects/node-cc1101/cc1101/driver.js).
 

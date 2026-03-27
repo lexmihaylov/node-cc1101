@@ -63,6 +63,7 @@ Defaults:
 - `connect [bus] [device] [speedHz]`
 - `disconnect`
 - `status`
+- `spectrum [startMHz] [stopMHz] [stepKHz] [dwellMs] [samples]`
 - `mode [packet|direct_async] [band] [modulation]`
 - `listen [pollMs]`
 - `listen [silenceGapUs] [sampleRateUs]`
@@ -105,6 +106,35 @@ cc1101> mode
 cc1101> mode packet 433 ook
 cc1101> mode direct_async 433 ook
 ```
+
+### `spectrum [startMHz] [stopMHz] [stepKHz] [dwellMs] [samples]`
+
+Sweeps a frequency range and prints a terminal RSSI spectrum view.
+
+Arguments:
+
+- `startMHz`: sweep start frequency in MHz
+- `stopMHz`: sweep stop frequency in MHz
+- `stepKHz`: frequency step size in kHz, default `50`
+- `dwellMs`: settle time after each retune, default `20`
+- `samples`: number of RSSI reads averaged per point, default `3`
+
+If `startMHz` and `stopMHz` are omitted, the shell uses a small default span around the current band:
+
+- `315`: `314-316 MHz`
+- `433`: `433-435 MHz`
+- `868`: `867-869 MHz`
+- `915`: `914-916 MHz`
+
+Examples:
+
+```text
+cc1101> spectrum
+cc1101> spectrum 433.7 434.2 25 25 5
+cc1101> spectrum 868.0 869.0 100 15 2
+```
+
+This is a received-power sweep using RSSI. It is not an IQ capture, waterfall, or protocol decoder.
 
 ### `listen [pollMs]`
 
