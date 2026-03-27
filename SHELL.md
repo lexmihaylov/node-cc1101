@@ -36,6 +36,8 @@ Override them at launch with:
 node radio-shell.js --bus 0 --device 0 --speed 100000
 ```
 
+Shell defaults for SPI, mode, GPIO pins, direct-async routing, and filter values live in [`config.js`](/home/lex/projects/node-cc1101/config.js).
+
 ## Model
 
 The shell works in two radio modes:
@@ -62,11 +64,12 @@ Defaults:
 - `disconnect`
 - `status`
 - `mode [packet|direct_async] [band] [modulation]`
-- `listen [pollMs|gpio] [silenceGapUs]`
+- `listen [pollMs]`
+- `listen [silenceGapUs] [sampleRateUs]`
 - `send <hex-bytes...>`
-- `send <file> [frameIndex] [silenceGapUs] [sampleRateUs] [txDataGpio] [repeats] [invert]`
-- `record <file> [rxDataGpio]`
-- `replay <file> [frameIndex] [silenceGapUs] [sampleRateUs] [txDataGpio] [repeats] [invert]`
+- `send <file> [frameIndex] [silenceGapUs] [sampleRateUs] [repeats] [invert]`
+- `record <file>`
+- `replay <file> [frameIndex] [silenceGapUs] [sampleRateUs] [repeats] [invert]`
 - `show <file> [silenceGapUs] [sampleRateUs]`
 - `stop`
 - `idle`
@@ -102,7 +105,9 @@ cc1101> mode packet 433 ook
 cc1101> mode direct_async 433 ook
 ```
 
-### `listen [pollMs|gpio] [silenceGapUs]`
+### `listen [pollMs]`
+
+### `listen [silenceGapUs] [sampleRateUs]`
 
 Mode-sensitive listen command:
 
@@ -116,7 +121,7 @@ cc1101> mode packet 433 ook
 cc1101> listen 20
 
 cc1101> mode direct_async 433 ook
-cc1101> listen 25 10000
+cc1101> listen 10000 250
 ```
 
 In direct-async mode the listener has two states:
@@ -135,6 +140,13 @@ Each printed raw signal includes:
 
 Live `listen` output is raw and unfiltered.
 
+Arguments:
+
+- `pollMs`: packet mode only polling interval
+- `sampleRateUs`: optional preferred bit unit size for the live `bits` row
+
+The direct-async RX GPIO is taken from [`config.js`](/home/lex/projects/node-cc1101/config.js). The current default is `GPIO25`.
+
 ### `send`
 
 Mode-sensitive send command:
@@ -149,17 +161,16 @@ cc1101> mode packet 433 ook
 cc1101> send aa 55 01
 
 cc1101> mode direct_async 433 ook
-cc1101> send /tmp/rf-captures/session-001.json 0 10000 250 24 10 false
+cc1101> send /tmp/rf-captures/session-001.json 0 10000 250 10 false
 ```
 
-### `record <file> [rxDataGpio]`
+### `record <file>`
 
 Records a continuous raw direct-async edge stream to one JSON file.
 
 Arguments:
 
 - `file`: output JSON file
-- `rxDataGpio`: Raspberry Pi input GPIO connected to CC1101 `GDO2`, default `25`
 
 While recording, the shell renders a continuously updating sampled live preview over the recent time window. The preview shows:
 
@@ -170,15 +181,17 @@ While recording, the shell renders a continuously updating sampled live preview 
 
 Every observed edge is recorded. No duration threshold, snapping, normalization, trimming, decoding, or frame extraction is performed.
 
+The direct-async RX GPIO is taken from [`config.js`](/home/lex/projects/node-cc1101/config.js). The current default is `GPIO25`.
+
 Example:
 
 ```text
 cc1101> mode direct_async 433 ook
-cc1101> record /tmp/rf-captures/session-001.json 25
+cc1101> record /tmp/rf-captures/session-001.json
 cc1101> stop
 ```
 
-### `replay <file> [frameIndex] [silenceGapUs] [sampleRateUs] [txDataGpio] [repeats] [invert]`
+### `replay <file> [frameIndex] [silenceGapUs] [sampleRateUs] [repeats] [invert]`
 
 Replays a saved raw edge file through the Raspberry Pi GPIO line that feeds the CC1101 async TX data input.
 
@@ -188,17 +201,17 @@ Arguments:
 - `frameIndex`: frame number identified from the saved stream, default `0`
 - `silenceGapUs`: silence threshold used to split the stream into frames, default `10000`
 - `sampleRateUs`: optional extracted-frame sample rate / bit duration threshold
-- `txDataGpio`: Raspberry Pi output GPIO driving CC1101 `GDO0` in TX, default `24`
 - `repeats`: number of times to transmit the sequence, default `10`
 - `invert`: invert replay polarity, default `false`
 
 For raw stream files, replay first segments the file into silence-delimited frames, then replays the selected frame with its first edge rebased to `0 us`.
 Before replay, the extracted frame is also passed through the same `150us` minimum pulse width filter used by `show`.
+The direct-async TX GPIO is taken from [`config.js`](/home/lex/projects/node-cc1101/config.js). The current default is `GPIO24`.
 
 Example:
 
 ```text
-cc1101> replay /tmp/rf-captures/session-001.json 0 10000 250 24 10 false
+cc1101> replay /tmp/rf-captures/session-001.json 0 10000 250 10 false
 ```
 
 ### `show <file> [silenceGapUs] [sampleRateUs]`
@@ -232,10 +245,10 @@ Stops active work and sends the radio to IDLE.
 
 ```text
 cc1101> mode direct_async 433 ook
-cc1101> record /tmp/rf-captures/session-001.json 25
+cc1101> record /tmp/rf-captures/session-001.json
 cc1101> stop
 cc1101> show /tmp/rf-captures/session-001.json 10000 250
-cc1101> replay /tmp/rf-captures/session-001.json 0 10000 250 24 10 false
+cc1101> replay /tmp/rf-captures/session-001.json 0 10000 250 10 false
 ```
 
 Direct async wiring model:

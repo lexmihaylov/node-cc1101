@@ -1,6 +1,7 @@
 // @ts-check
 
 const { Gpio } = require("pigpio");
+const appConfig = require("../../config");
 const { CC1101Driver } = require("../driver");
 const { sleep } = require("../utils");
 const { loadCaptureFile, segmentRawFrames } = require("./capture-file");
@@ -94,11 +95,11 @@ class CC1101WindowReplayer {
       bus: options.bus ?? 0,
       device: options.device ?? 0,
       speedHz: options.speedHz ?? 100000,
-      txDataGpio: options.txDataGpio ?? options.gpio ?? 24,
-      repeats: options.repeats ?? 10,
-      repeatGapUs: options.repeatGapUs ?? 10000,
+      txDataGpio: options.txDataGpio ?? options.gpio ?? appConfig.directAsync.tx.gpio,
+      repeats: options.repeats ?? appConfig.directAsync.tx.repeats,
+      repeatGapUs: options.repeatGapUs ?? appConfig.directAsync.tx.repeatGapUs,
       preDelayMs: options.preDelayMs ?? 1000,
-      invert: options.invert ?? false,
+      invert: options.invert ?? appConfig.directAsync.tx.invert,
       onMessage: options.onMessage ?? ((message) => console.log(message)),
     };
   }
@@ -119,7 +120,12 @@ class CC1101WindowReplayer {
       await radio.open();
       await radio.reset();
       await radio.verifyChip();
-      await radio.startDirectAsyncTx();
+      await radio.startDirectAsyncTx({
+        band: appConfig.radio.band,
+        modulation: appConfig.radio.modulation,
+        mode: appConfig.radio.mode,
+        gpio: appConfig.directAsync.tx.radio,
+      });
 
       this.options.onMessage(`txDataGpio:    ${this.options.txDataGpio}`);
       this.options.onMessage(`frame:         ${replay.frameIndex}`);

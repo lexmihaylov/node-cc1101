@@ -1,7 +1,7 @@
 // @ts-check
 
 const { Gpio } = require("pigpio");
-const { VALUE } = require("../constants");
+const appConfig = require("../../config");
 const { CC1101Driver } = require("../driver");
 const { BAND, MODULATION, RADIO_MODE } = require("../profiles");
 const { sleep } = require("../utils");
@@ -23,6 +23,7 @@ const { renderRawSignal } = require("./capture-file");
  * @property {number=} speedHz
  * @property {number=} gpio
  * @property {number=} silenceGapUs
+ * @property {number=} bitUnitUs
  * @property {number=} pollMs
  * @property {(message: string) => void=} onMessage
  * @property {(frame: RawFrame) => void=} onFrame
@@ -38,15 +39,18 @@ class CC1101RawListener {
       bus: options.bus ?? 0,
       device: options.device ?? 0,
       speedHz: options.speedHz ?? 100000,
-      gpio: options.gpio ?? 25,
-      silenceGapUs: options.silenceGapUs ?? 10000,
+      gpio: options.gpio ?? appConfig.directAsync.rx.gpio,
+      silenceGapUs: options.silenceGapUs ?? appConfig.directAsync.rx.silenceGapUs,
+      bitUnitUs: options.bitUnitUs ?? appConfig.directAsync.rx.bitUnitUs,
       pollMs: options.pollMs ?? 5,
       onMessage: options.onMessage ?? ((message) => console.log(message)),
       onFrame: options.onFrame ?? ((frame) => {
         this.options.onMessage("---- raw signal ----");
         this.options.onMessage(`ts:          ${frame.ts}`);
         this.options.onMessage(`reason:      ${frame.reason}`);
-        const rendered = renderRawSignal(frame);
+        const rendered = renderRawSignal(frame, {
+          bitUnitUs: this.options.bitUnitUs,
+        });
         if (rendered) {
           this.options.onMessage(rendered);
         } else {
@@ -157,13 +161,10 @@ class CC1101RawListener {
     await this.radio.reset();
     await this.radio.verifyChip();
     await this.radio.startDirectAsyncRx({
-      band: BAND.MHZ_433,
-      modulation: MODULATION.OOK,
+      band: appConfig.radio.band ?? BAND.MHZ_433,
+      modulation: appConfig.radio.modulation ?? MODULATION.OOK,
       mode: RADIO_MODE.DIRECT_ASYNC,
-      gpio: {
-        gdo0: VALUE.IOCFG.HIGH_IMPEDANCE,
-        gdo2: VALUE.IOCFG.ASYNC_SERIAL_DATA,
-      },
+      gpio: appConfig.directAsync.rx.radio,
     });
     await sleep(100);
 

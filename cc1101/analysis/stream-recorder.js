@@ -3,9 +3,9 @@
 const fs = require("fs");
 const path = require("path");
 const { Gpio } = require("pigpio");
+const appConfig = require("../../config");
 const { CC1101Driver } = require("../driver");
 const { BAND, MODULATION, RADIO_MODE } = require("../profiles");
-const { VALUE } = require("../constants");
 const { saveCaptureFile } = require("./capture-file");
 
 /**
@@ -51,11 +51,11 @@ class CC1101StreamRecorder {
       bus: options.bus ?? 0,
       device: options.device ?? 0,
       speedHz: options.speedHz ?? 100000,
-      rxDataGpio: options.rxDataGpio ?? 25,
-      previewIntervalMs: options.previewIntervalMs ?? 120,
-      previewEdgeWindow: options.previewEdgeWindow ?? 16,
-      previewWindowMs: options.previewWindowMs ?? 2400,
-      previewSampleMs: options.previewSampleMs ?? 25,
+      rxDataGpio: options.rxDataGpio ?? appConfig.directAsync.rx.gpio,
+      previewIntervalMs: options.previewIntervalMs ?? appConfig.directAsync.preview.intervalMs,
+      previewEdgeWindow: options.previewEdgeWindow ?? appConfig.directAsync.preview.edgeWindow,
+      previewWindowMs: options.previewWindowMs ?? appConfig.directAsync.preview.windowMs,
+      previewSampleMs: options.previewSampleMs ?? appConfig.directAsync.preview.sampleMs,
       filepath: options.filepath ?? "/tmp/rf-stream.json",
       onMessage: options.onMessage ?? ((message) => console.log(message)),
       onPreview: options.onPreview ?? ((frame) => console.log(frame)),
@@ -199,13 +199,10 @@ class CC1101StreamRecorder {
     await this.radio.reset();
     await this.radio.verifyChip();
     await this.radio.startDirectAsyncRx({
-      band: BAND.MHZ_433,
-      modulation: MODULATION.OOK,
+      band: appConfig.radio.band ?? BAND.MHZ_433,
+      modulation: appConfig.radio.modulation ?? MODULATION.OOK,
       mode: RADIO_MODE.DIRECT_ASYNC,
-      gpio: {
-        gdo0: VALUE.IOCFG.HIGH_IMPEDANCE,
-        gdo2: VALUE.IOCFG.ASYNC_SERIAL_DATA,
-      },
+      gpio: appConfig.directAsync.rx.radio,
       packet: {
         appendStatus: false,
       },
@@ -257,8 +254,8 @@ class CC1101StreamRecorder {
       durationMs: Math.max(0, stoppedAtMs - this.startedAtMs),
       edgeCount: this.edges.length,
       rxDataGpio: this.options.rxDataGpio,
-      band: BAND.MHZ_433,
-      modulation: MODULATION.OOK,
+      band: appConfig.radio.band ?? BAND.MHZ_433,
+      modulation: appConfig.radio.modulation ?? MODULATION.OOK,
       mode: RADIO_MODE.DIRECT_ASYNC,
       edges: this.edges,
     };

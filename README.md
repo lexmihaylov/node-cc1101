@@ -1,6 +1,6 @@
 # node-cc1101
 
-Node.js CC1101 library and Raspberry Pi RF toolkit for 433/868/915 MHz over SPI and GPIO.
+Node.js CC1101 library and Raspberry Pi RF toolkit for 315/433/868/915 MHz over SPI and GPIO.
 
 This project has two parts:
 
@@ -64,6 +64,8 @@ Direct async wiring model:
 - TX/replay: `Raspberry Pi output GPIO -> CC1101 GDO0 async TX data input`
 
 These are opposite directions on the same CC1101 data pin. Run one mode at a time.
+
+The shell defaults for SPI, mode, band, GPIO pins, direct-async routing, and filter values live in [`config.js`](/home/lex/projects/node-cc1101/config.js).
 
 ## Library usage
 
@@ -129,8 +131,8 @@ await radio.startDirectAsyncRx({
   modulation: MODULATION.OOK,
   mode: RADIO_MODE.DIRECT_ASYNC,
   gpio: {
-    gdo0: GDO_SIGNAL.ASYNC_SERIAL_DATA,
-    gdo2: GDO_SIGNAL.PQI,
+    gdo0: GDO_SIGNAL.HIGH_IMPEDANCE,
+    gdo2: GDO_SIGNAL.ASYNC_SERIAL_DATA,
   },
 });
 ```
@@ -151,10 +153,11 @@ cc1101> listen 20
 cc1101> send aa 55 01
 
 cc1101> mode direct_async 433 ook
-cc1101> record /tmp/rf-captures/session-001.json 25
+cc1101> listen 10000 250
+cc1101> record /tmp/rf-captures/session-001.json
 cc1101> stop
 cc1101> show /tmp/rf-captures/session-001.json 10000 250
-cc1101> replay /tmp/rf-captures/session-001.json 0 10000 250 24 10 false
+cc1101> replay /tmp/rf-captures/session-001.json 0 10000 250 10 false
 ```
 
 ### Main shell commands
@@ -164,11 +167,12 @@ cc1101> replay /tmp/rf-captures/session-001.json 0 10000 250 24 10 false
 - `man [command]`
 - `status`
 - `mode [packet|direct_async] [band] [modulation]`
-- `listen [pollMs|gpio] [silenceGapUs]`
+- `listen [pollMs]`
+- `listen [silenceGapUs] [sampleRateUs]`
 - `send <hex-bytes...>`
-- `send <file> [frameIndex] [silenceGapUs] [sampleRateUs] [txDataGpio] [repeats] [invert]`
-- `record <file> [rxDataGpio]`
-- `replay <file> [frameIndex] [silenceGapUs] [sampleRateUs] [txDataGpio] [repeats] [invert]`
+- `send <file> [frameIndex] [silenceGapUs] [sampleRateUs] [repeats] [invert]`
+- `record <file>`
+- `replay <file> [frameIndex] [silenceGapUs] [sampleRateUs] [repeats] [invert]`
 - `show <file> [silenceGapUs] [sampleRateUs]`
 - `stop`
 - `idle`
@@ -205,6 +209,13 @@ In direct-async `listen`, the shell uses a simple state machine:
 - first edge switches to `signal_detected`
 - if no edge arrives for `silenceGapUs`, the state returns to `silence`
 - edges collected between those transitions are emitted as one raw signal window
+
+You can optionally provide `sampleRateUs` to force the live `bits` row to use a preferred bit unit size instead of auto-detecting it.
+
+The shell no longer accepts RX/TX GPIO pins as command arguments. Those values are taken from [`config.js`](/home/lex/projects/node-cc1101/config.js), with the current defaults:
+
+- RX/listen/record: `GDO2 -> GPIO25`
+- TX/replay/send: `GDO0 -> GPIO24`
 
 Detailed shell documentation is available in [SHELL.md](/home/lex/projects/node-cc1101/SHELL.md).
 

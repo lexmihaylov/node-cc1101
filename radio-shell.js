@@ -2,6 +2,7 @@
 
 const fs = require("fs");
 const readline = require("readline");
+const appConfig = require("./config");
 const { CC1101RawListener } = require("./cc1101/analysis/raw-listener");
 const { CC1101StreamRecorder } = require("./cc1101/analysis/stream-recorder");
 const {
@@ -86,7 +87,7 @@ const MANUALS = {
     "  device",
     "    SPI chip-select number. Default is the current shell device, usually 0.",
     "  speedHz",
-    "    SPI clock speed in Hz. Default is the current shell speed, usually 100000.",
+    `    SPI clock speed in Hz. Default is the current shell speed, usually ${appConfig.spi.speedHz}.`,
     "",
     "DESCRIPTION",
     "  Reconnects the shell to the radio using the supplied SPI settings.",
@@ -145,14 +146,14 @@ const MANUALS = {
     "",
     "USAGE",
     "  listen [pollMs]",
-    "  listen [gpio] [silenceGapUs]",
+    "  listen [silenceGapUs] [sampleRateUs]",
     "",
     "MODE BEHAVIOR",
     "  packet mode",
     "    listen [pollMs]",
     "    Starts FIFO packet receive polling.",
     "  direct_async mode",
-    "    listen [gpio] [silenceGapUs]",
+    "    listen [silenceGapUs] [sampleRateUs]",
     "    Starts a raw OOK edge listener with two states:",
     "    silence -> signal_detected -> silence.",
     "    The edges collected between those state transitions are emitted as one raw signal window.",
@@ -160,14 +161,16 @@ const MANUALS = {
     "OPTIONS",
     "  pollMs",
     "    Packet mode only. Delay between FIFO polling passes. Default 20 ms.",
-    "  gpio",
-    "    Direct-async mode only. Raspberry Pi GPIO connected to CC1101 GDO2. Default 25.",
     "  silenceGapUs",
     "    Direct-async mode only. If no new edge arrives for at least this many microseconds,",
     "    the current signal is considered finished and the listener returns to silence.",
-    "    Default 10000 us.",
+    `    Default ${appConfig.directAsync.rx.silenceGapUs} us.`,
+    "  sampleRateUs",
+    "    Direct-async mode only. Preferred bit unit size for the live `bits` row.",
+    "    This affects rendering only and does not filter live edges.",
     "",
     "DESCRIPTION",
+    `  Direct-async RX pin routing is taken from config.js (default Pi GPIO ${appConfig.directAsync.rx.gpio}).`,
     "  Every silence-delimited signal is emitted, including single-edge signals.",
     "  Stops any existing runtime before starting a new listener.",
     "  Stop it with `stop`, `idle`, `disconnect`, or Ctrl+C.",
@@ -178,7 +181,7 @@ const MANUALS = {
     "",
     "USAGE",
     "  send <hex-bytes...>",
-    "  send <file> [frameIndex] [silenceGapUs] [sampleRateUs] [txDataGpio] [repeats] [invert]",
+    "  send <file> [frameIndex] [silenceGapUs] [sampleRateUs] [repeats] [invert]",
     "",
     "MODE BEHAVIOR",
     "  packet mode",
@@ -192,21 +195,20 @@ const MANUALS = {
     "  frameIndex",
     "    For raw stream files, replay this identified frame. Default 0.",
     "  silenceGapUs",
-    "    For raw stream files, split frames using this silence threshold. Default 10000 us.",
+    `    For raw stream files, split frames using this silence threshold. Default ${appConfig.directAsync.rx.silenceGapUs} us.`,
     "  sampleRateUs",
     "    Optional extracted-frame sample rate / bit duration in microseconds.",
     `    Edges shorter than this are filtered out post-processing, and the bit view uses this as its unit.`,
-    "  txDataGpio",
-    "    Raspberry Pi output GPIO driving the CC1101 GDO0 TX data input. Default 24.",
     "  repeats",
-    "    Number of transmissions. Default 10.",
+    `    Number of transmissions. Default ${appConfig.directAsync.tx.repeats}.`,
     "  invert",
     "    Invert replay polarity. Accepts true/false, 1/0, yes/no, invert/normal.",
-    "    Default false.",
+    `    Default ${appConfig.directAsync.tx.invert}.`,
     "",
     "DESCRIPTION",
     "  Use `send` instead of separate TX verbs. In packet mode it writes FIFO data.",
     "  In direct_async mode it replays the saved raw edge timing file after applying",
+    `  the TX pin routing from config.js (default Pi GPIO ${appConfig.directAsync.tx.gpio}) and`,
     `  the built-in minimum pulse width filter (${DEFAULT_MINIMUM_PULSE_WIDTH_US} us).`,
   ].join("\n"),
   record: [
@@ -214,16 +216,15 @@ const MANUALS = {
     "  record - capture one continuous direct-async edge stream to a file",
     "",
     "USAGE",
-    "  record <file> [rxDataGpio]",
+    "  record <file>",
     "",
     "OPTIONS",
     "  file",
     "    Output JSON file that receives the full recorded edge stream.",
-    "  rxDataGpio",
-    "    Raspberry Pi input GPIO connected to CC1101 GDO2. Default 25.",
     "",
     "DESCRIPTION",
     "  Stores the raw edge stream exactly as seen on the GPIO line.",
+    `  RX pin routing is taken from config.js (default Pi GPIO ${appConfig.directAsync.rx.gpio}).`,
     "  Every observed edge is recorded. No duration threshold is applied.",
     "  No normalization, snapping, trimming, decoding, or frame extraction is performed.",
     "  While recording, the shell renders a continuously updating sampled live preview over the",
@@ -235,7 +236,7 @@ const MANUALS = {
     "  replay - transmit a saved raw edge file through direct async TX",
     "",
     "USAGE",
-    "  replay <file> [frameIndex] [silenceGapUs] [sampleRateUs] [txDataGpio] [repeats] [invert]",
+    "  replay <file> [frameIndex] [silenceGapUs] [sampleRateUs] [repeats] [invert]",
     "",
     "OPTIONS",
     "  file",
@@ -243,22 +244,21 @@ const MANUALS = {
     "  frameIndex",
     "    For raw stream files, replay this identified frame. Default 0.",
     "  silenceGapUs",
-    "    For raw stream files, split frames using this silence threshold. Default 10000 us.",
+    `    For raw stream files, split frames using this silence threshold. Default ${appConfig.directAsync.rx.silenceGapUs} us.`,
     "  sampleRateUs",
     "    Optional extracted-frame sample rate / bit duration in microseconds.",
     `    Edges shorter than this are filtered out post-processing before replay.`,
-    "  txDataGpio",
-    "    Raspberry Pi output GPIO driving CC1101 GDO0 in TX. Default 24.",
     "  repeats",
-    "    Number of times to transmit the sequence. Default 10.",
+    `    Number of times to transmit the sequence. Default ${appConfig.directAsync.tx.repeats}.`,
     "  invert",
     "    Invert replay polarity. Accepts true/false, 1/0, yes/no, invert/normal.",
-    "    Default false.",
+    `    Default ${appConfig.directAsync.tx.invert}.`,
     "",
     "DESCRIPTION",
     "  Stops active work, puts the radio into direct async TX, segments the file into frames",
     "  using the supplied silence threshold, and replays the selected frame as recorded edge events",
     "  rebased to the start of that frame.",
+    `  TX pin routing is taken from config.js (default Pi GPIO ${appConfig.directAsync.tx.gpio}).`,
     `  A built-in minimum pulse width filter (${DEFAULT_MINIMUM_PULSE_WIDTH_US} us) is applied`,
     "  to the extracted frame before replay.",
   ].join("\n"),
@@ -273,7 +273,7 @@ const MANUALS = {
     "  file",
     "    Any saved stream/frame/capture JSON file.",
     "  silenceGapUs",
-    "    For raw stream files, split frames using this silence threshold. Default 10000 us.",
+    `    For raw stream files, split frames using this silence threshold. Default ${appConfig.directAsync.rx.silenceGapUs} us.`,
     "  sampleRateUs",
     "    Optional extracted-frame sample rate / bit duration in microseconds.",
     `    Edges shorter than this are filtered out post-processing, and the bit view uses this as its unit.`,
@@ -284,6 +284,7 @@ const MANUALS = {
     "  each frame with a compact shape row and a scaled high/low timeline so similar captures",
     "  can be compared visually without changing the stored timings.",
     "  Every identified frame is shown, including single-edge frames.",
+    `  The default segmentation/filter values come from config.js.`,
     `  A built-in minimum pulse width filter (${DEFAULT_MINIMUM_PULSE_WIDTH_US} us) is applied`,
     "  to extracted frames before rendering.",
   ].join("\n"),
@@ -330,9 +331,9 @@ const MANUALS = {
 
 function createDefaultRadioConfig() {
   return {
-    band: BAND.MHZ_433,
-    modulation: MODULATION.OOK,
-    mode: RADIO_MODE.PACKET,
+    band: appConfig.radio.band,
+    modulation: appConfig.radio.modulation,
+    mode: appConfig.radio.mode,
     packet: {
       appendStatus: true,
       lengthMode: PACKET_LENGTH_MODE.VARIABLE,
@@ -406,9 +407,9 @@ async function stableRead(radio, address) {
 
 class RadioShell {
   constructor(options = {}) {
-    this.bus = options.bus ?? 0;
-    this.device = options.device ?? 0;
-    this.speedHz = options.speedHz ?? 100000;
+    this.bus = options.bus ?? appConfig.spi.bus;
+    this.device = options.device ?? appConfig.spi.device;
+    this.speedHz = options.speedHz ?? appConfig.spi.speedHz;
     this.radio = null;
     this.listening = false;
     this.runtime = null;
@@ -465,11 +466,12 @@ class RadioShell {
     console.log("  disconnect");
     console.log("  status");
     console.log("  mode [packet|direct_async] [band] [modulation]");
-    console.log("  listen [pollMs|gpio] [silenceGapUs]");
+    console.log("  listen [pollMs]");
+    console.log("  listen [silenceGapUs] [sampleRateUs]");
     console.log("  send <hex-bytes...>");
-    console.log("  send <file> [frameIndex] [silenceGapUs] [sampleRateUs] [txDataGpio] [repeats] [invert]");
-    console.log("  record <file> [rxDataGpio]");
-    console.log("  replay <file> [frameIndex] [silenceGapUs] [sampleRateUs] [txDataGpio] [repeats] [invert]");
+    console.log("  send <file> [frameIndex] [silenceGapUs] [sampleRateUs] [repeats] [invert]");
+    console.log("  record <file>");
+    console.log("  replay <file> [frameIndex] [silenceGapUs] [sampleRateUs] [repeats] [invert]");
     console.log("  show <file> [silenceGapUs] [sampleRateUs]");
     console.log("  stop");
     console.log("  idle");
@@ -482,11 +484,11 @@ class RadioShell {
     console.log("  listen 20");
     console.log("  send aa 55 01");
     console.log("  mode direct_async 433 ook");
-    console.log("  listen 25 10000");
-    console.log("  record /tmp/rf-captures/session-001.json 25");
+    console.log(`  listen ${appConfig.directAsync.rx.silenceGapUs} 250`);
+    console.log("  record /tmp/rf-captures/session-001.json");
     console.log("  stop");
-    console.log("  show /tmp/rf-captures/session-001.json 10000 250");
-    console.log("  replay /tmp/rf-captures/session-001.json 0 10000 250 24 10 false");
+    console.log(`  show /tmp/rf-captures/session-001.json ${appConfig.directAsync.rx.silenceGapUs} 250`);
+    console.log(`  replay /tmp/rf-captures/session-001.json 0 ${appConfig.directAsync.rx.silenceGapUs} 250 ${appConfig.directAsync.tx.repeats} false`);
   }
 
   printManual(command) {
@@ -578,7 +580,7 @@ class RadioShell {
     }
   }
 
-  async startDirectAsyncListen(gpio = 25, silenceGapUs = 10000) {
+  async startDirectAsyncListen(silenceGapUs = appConfig.directAsync.rx.silenceGapUs, sampleRateUs = appConfig.directAsync.rx.bitUnitUs) {
     await this.stop();
     await this.disconnect();
 
@@ -586,8 +588,9 @@ class RadioShell {
       bus: this.bus,
       device: this.device,
       speedHz: this.speedHz,
-      gpio: Number(gpio),
+      gpio: appConfig.directAsync.rx.gpio,
       silenceGapUs: Number(silenceGapUs),
+      bitUnitUs: sampleRateUs !== undefined ? Number(sampleRateUs) : undefined,
       onMessage: (message) => {
         console.log(`[async] ${message}`);
       },
@@ -596,19 +599,19 @@ class RadioShell {
     await this.runtime.start();
   }
 
-  async listen(arg0, arg1, arg2, arg3) {
+  async listen(arg0, arg1) {
     if (this.radioConfig.mode === RADIO_MODE.PACKET) {
       await this.startPacketListen(Number(arg0 ?? 20));
       return;
     }
 
     await this.startDirectAsyncListen(
-      Number(arg0 ?? 25),
-      Number(arg1 ?? 10000)
+      Number(arg0 ?? appConfig.directAsync.rx.silenceGapUs),
+      arg1
     );
   }
 
-  async replay(file, frameIndex = 0, silenceGapUs = 10000, sampleRateUs = DEFAULT_MINIMUM_PULSE_WIDTH_US, txDataGpio = 24, repeats = 10, invert = false) {
+  async replay(file, frameIndex = 0, silenceGapUs = appConfig.directAsync.rx.silenceGapUs, sampleRateUs = appConfig.directAsync.filter.minimumPulseWidthUs, repeats = appConfig.directAsync.tx.repeats, invert = appConfig.directAsync.tx.invert) {
     if (!file) {
       throw new Error("replay requires a capture file path");
     }
@@ -627,7 +630,7 @@ class RadioShell {
       bus: this.bus,
       device: this.device,
       speedHz: this.speedHz,
-      txDataGpio: Number(txDataGpio),
+      txDataGpio: appConfig.directAsync.tx.gpio,
       repeats: Number(repeats),
       invert: parseBooleanFlag(invert, false),
       onMessage: (message) => {
@@ -652,7 +655,7 @@ class RadioShell {
       return;
     }
 
-    const [file, frameIndex, silenceGapUs, sampleRateUs, txDataGpio, repeats, invert] = args;
+    const [file, frameIndex, silenceGapUs, sampleRateUs, repeats, invert] = args;
     if (!fs.existsSync(String(file))) {
       throw new Error("direct_async send requires a replayable file path");
     }
@@ -660,15 +663,14 @@ class RadioShell {
     await this.replay(
       file,
       frameIndex ?? 0,
-      silenceGapUs ?? 10000,
-      sampleRateUs ?? DEFAULT_MINIMUM_PULSE_WIDTH_US,
-      txDataGpio ?? 24,
-      repeats ?? 10,
-      invert ?? false
+      silenceGapUs ?? appConfig.directAsync.rx.silenceGapUs,
+      sampleRateUs ?? appConfig.directAsync.filter.minimumPulseWidthUs,
+      repeats ?? appConfig.directAsync.tx.repeats,
+      invert ?? appConfig.directAsync.tx.invert
     );
   }
 
-  async record(file, rxDataGpio = 25) {
+  async record(file) {
     if (!file) {
       throw new Error("record requires an output file path");
     }
@@ -679,7 +681,7 @@ class RadioShell {
     const renderLiveRecordFrame = (frame) => {
       const header = [
         `${COLOR.cyan}record${COLOR.reset} ${COLOR.dim}| live preview${COLOR.reset}`,
-        `${COLOR.blue}file${COLOR.reset}=${file}  ${COLOR.blue}gpio${COLOR.reset}=${Number(rxDataGpio)}`,
+        `${COLOR.blue}file${COLOR.reset}=${file}  ${COLOR.blue}gpio${COLOR.reset}=${appConfig.directAsync.rx.gpio}`,
         `${COLOR.dim}Ctrl+C or 'stop' ends recording and saves the stream${COLOR.reset}`,
         "",
       ].join("\n");
@@ -693,7 +695,7 @@ class RadioShell {
       device: this.device,
       speedHz: this.speedHz,
       filepath: String(file),
-      rxDataGpio: Number(rxDataGpio),
+      rxDataGpio: appConfig.directAsync.rx.gpio,
       onMessage: (message) => {
         console.log(`[record] ${message}`);
       },
@@ -705,7 +707,7 @@ class RadioShell {
     await this.runtime.start();
   }
 
-  show(file, silenceGapUs = 10000, sampleRateUs = DEFAULT_MINIMUM_PULSE_WIDTH_US) {
+  show(file, silenceGapUs = appConfig.directAsync.rx.silenceGapUs, sampleRateUs = appConfig.directAsync.filter.minimumPulseWidthUs) {
     if (!file) {
       throw new Error("show requires a capture file path");
     }
@@ -785,13 +787,13 @@ async function executeCommand(shell, line, onExit) {
       shell.setMode(subcommand, rest[0], rest[1]);
     }
   } else if (command === "listen") {
-    void shell.listen(subcommand, rest[0], rest[1], rest[2]).catch((error) => {
+    void shell.listen(subcommand, rest[0]).catch((error) => {
       console.error(`listen failed: ${error.message}`);
     });
   } else if (command === "send") {
     await shell.send([subcommand, ...rest].filter(Boolean));
   } else if (command === "record") {
-    await shell.record(subcommand, rest[0]);
+    await shell.record(subcommand);
   } else if (command === "replay") {
     await shell.replay(subcommand, rest[0], rest[1], rest[2], rest[3], rest[4], rest[5]);
   } else if (command === "show") {
@@ -859,9 +861,9 @@ function clearTerminal() {
 
 async function main() {
   const args = parseArgs(process.argv);
-  const bus = Number(args.bus ?? 0);
-  const device = Number(args.device ?? 0);
-  const speedHz = Number(args.speed ?? 100000);
+  const bus = Number(args.bus ?? appConfig.spi.bus);
+  const device = Number(args.device ?? appConfig.spi.device);
+  const speedHz = Number(args.speed ?? appConfig.spi.speedHz);
   const shell = new RadioShell({ bus, device, speedHz });
   const rl = readline.createInterface({
     input: process.stdin,
