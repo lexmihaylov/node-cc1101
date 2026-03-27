@@ -1,7 +1,7 @@
 // @ts-check
 
 const spi = require("spi-device");
-const { ACCESS, DEFAULTS, FIFO, REG, STATUS, STROBE } = require("./constants.js");
+const { ACCESS, DEFAULTS, FIFO, REG, STATUS, STROBE, VALUE } = require("./constants.js");
 const { buildRadioConfig, RADIO_MODE } = require("./profiles.js");
 
 /**
@@ -424,21 +424,41 @@ class CC1101Driver {
       return { overflow: false, packet: null };
     }
 
-    const [packetLength] = await this.readBurst(FIFO.RX, 1);
+    const [pktctrl0, pktctrl1] = await Promise.all([
+      this.readRegister(REG.PKTCTRL0),
+      this.readRegister(REG.PKTCTRL1),
+    ]);
+    const lengthMode = pktctrl0 & 0x03;
+    const appendStatus = Boolean(pktctrl1 & VALUE.PKTCTRL1.APPEND_STATUS);
 
-    if (!packetLength || packetLength > 61) {
-      await this.enterRxSafe();
-      return { overflow: false, packet: null, invalidLength: packetLength };
+    let packetLength;
+    /** @type {number[]} */
+    let rest;
+
+    if (lengthMode === 0x00) {
+      packetLength = await this.readRegister(REG.PKTLEN);
+      if (!packetLength || packetLength > 61) {
+        await this.enterRxSafe();
+        return { overflow: false, packet: null, invalidLength: packetLength };
+      }
+      rest = await this.readBurst(FIFO.RX, packetLength + (appendStatus ? 2 : 0));
+    } else if (lengthMode === 0x01) {
+      [packetLength] = await this.readBurst(FIFO.RX, 1);
+      if (!packetLength || packetLength > 61) {
+        await this.enterRxSafe();
+        return { overflow: false, packet: null, invalidLength: packetLength };
+      }
+      rest = await this.readBurst(FIFO.RX, packetLength + (appendStatus ? 2 : 0));
+    } else {
+      throw new Error("readFifoPacket does not support infinite packet length mode");
     }
-
-    const rest = await this.readBurst(FIFO.RX, packetLength + 2);
 
     return {
       overflow: false,
       packet: {
         length: packetLength,
         payload: rest.slice(0, packetLength),
-        status: rest.slice(packetLength, packetLength + 2),
+        status: appendStatus ? rest.slice(packetLength, packetLength + 2) : [],
       },
     };
   }

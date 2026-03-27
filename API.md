@@ -58,6 +58,9 @@ Important enums:
 - `RADIO_MODE`
 - `GDO_SIGNAL`
 - `PACKET_LENGTH_MODE`
+- `PACKET_ADDRESS_CHECK`
+- `PACKET_SYNC_MODE`
+- `PREAMBLE_BYTES`
 
 Important helpers:
 
@@ -66,6 +69,21 @@ Important helpers:
 - `getDirectAsyncPreset(options?)`
 - `buildRadioConfig(options?)`
 - `validateRadioConfig(options?)`
+
+Packet-mode `options.packet` supports:
+
+- `lengthMode`
+- `appendStatus`
+- `length`
+- `crc`
+- `whitening`
+- `fec`
+- `addressCheck`
+- `address`
+- `syncMode`
+- `syncWord`
+- `preambleBytes`
+- `control1`
 
 ## Analysis modules
 
@@ -123,7 +141,16 @@ Purpose:
 ### Minimal packet RX
 
 ```js
-const { CC1101Driver, BAND, MODULATION, RADIO_MODE } = require("node-cc1101");
+const {
+  CC1101Driver,
+  BAND,
+  MODULATION,
+  RADIO_MODE,
+  PACKET_LENGTH_MODE,
+  PACKET_ADDRESS_CHECK,
+  PACKET_SYNC_MODE,
+  PREAMBLE_BYTES,
+} = require("node-cc1101");
 
 const radio = new CC1101Driver({ bus: 0, device: 0, speedHz: 100000 });
 await radio.open();
@@ -132,8 +159,19 @@ await radio.verifyChip();
 
 await radio.startPacketRx({
   band: BAND.MHZ_433,
-  modulation: MODULATION.OOK,
+  modulation: MODULATION.GFSK,
   mode: RADIO_MODE.PACKET,
+  packet: {
+    lengthMode: PACKET_LENGTH_MODE.VARIABLE,
+    crc: true,
+    whitening: false,
+    fec: false,
+    appendStatus: true,
+    addressCheck: PACKET_ADDRESS_CHECK.NONE,
+    syncMode: PACKET_SYNC_MODE.SYNC_16_16,
+    syncWord: 0xd391,
+    preambleBytes: PREAMBLE_BYTES.BYTES_4,
+  },
 });
 
 const packet = await radio.readFifoPacket();

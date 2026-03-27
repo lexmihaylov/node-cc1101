@@ -4,10 +4,11 @@ const { REG, VALUE } = require("./constants");
 
 /**
  * @typedef {"315" | "433" | "868" | "915"} Band
- * @typedef {"ook" | "fsk"} Modulation
+ * @typedef {"ook" | "fsk" | "2fsk" | "gfsk" | "msk"} Modulation
  * @typedef {"packet" | "direct_async"} RadioMode
  * @typedef {"chip_ready_n" | "high_impedance" | "pqi" | "async_serial_data"} GdoSignal
  * @typedef {"fixed" | "variable"} PacketLengthMode
+ * @typedef {"none" | "address" | "address_0_broadcast" | "address_0_255_broadcast"} PacketAddressCheck
  * @typedef {Record<number, number>} RegisterMap
  *
  * @typedef {object} RadioPacketOptions
@@ -15,6 +16,14 @@ const { REG, VALUE } = require("./constants");
  * @property {PacketLengthMode=} lengthMode
  * @property {number=} length
  * @property {number=} control1
+ * @property {boolean=} crc
+ * @property {boolean=} whitening
+ * @property {boolean=} fec
+ * @property {PacketAddressCheck=} addressCheck
+ * @property {number=} address
+ * @property {number=} syncMode
+ * @property {number | [number, number]=} syncWord
+ * @property {2 | 3 | 4 | 6 | 8 | 12 | 16 | 24=} preambleBytes
  *
  * @typedef {object} RadioGpioOptions
  * @property {GdoSignal | number=} gdo0
@@ -43,10 +52,13 @@ const BAND = {
   MHZ_915: "915",
 };
 
-/** @type {{ OOK: Modulation, FSK: Modulation }} */
+/** @type {{ OOK: Modulation, FSK: Modulation, TWO_FSK: Modulation, GFSK: Modulation, MSK: Modulation }} */
 const MODULATION = {
   OOK: "ook",
   FSK: "fsk",
+  TWO_FSK: "2fsk",
+  GFSK: "gfsk",
+  MSK: "msk",
 };
 
 /** @type {{ PACKET: RadioMode, DIRECT_ASYNC: RadioMode }} */
@@ -67,6 +79,38 @@ const GDO_SIGNAL = {
 const PACKET_LENGTH_MODE = {
   FIXED: "fixed",
   VARIABLE: "variable",
+};
+
+/** @type {{ NONE: PacketAddressCheck, ADDRESS: PacketAddressCheck, ADDRESS_0_BROADCAST: PacketAddressCheck, ADDRESS_0_255_BROADCAST: PacketAddressCheck }} */
+const PACKET_ADDRESS_CHECK = {
+  NONE: "none",
+  ADDRESS: "address",
+  ADDRESS_0_BROADCAST: "address_0_broadcast",
+  ADDRESS_0_255_BROADCAST: "address_0_255_broadcast",
+};
+
+/** @type {{ NONE: number, SYNC_15_16: number, SYNC_16_16: number, SYNC_30_32: number, CARRIER: number, CARRIER_SYNC_15_16: number, CARRIER_SYNC_16_16: number, CARRIER_SYNC_30_32: number }} */
+const PACKET_SYNC_MODE = {
+  NONE: 0x00,
+  SYNC_15_16: 0x01,
+  SYNC_16_16: 0x02,
+  SYNC_30_32: 0x03,
+  CARRIER: 0x04,
+  CARRIER_SYNC_15_16: 0x05,
+  CARRIER_SYNC_16_16: 0x06,
+  CARRIER_SYNC_30_32: 0x07,
+};
+
+/** @type {{ BYTES_2: 2, BYTES_3: 3, BYTES_4: 4, BYTES_6: 6, BYTES_8: 8, BYTES_12: 12, BYTES_16: 16, BYTES_24: 24 }} */
+const PREAMBLE_BYTES = {
+  BYTES_2: 2,
+  BYTES_3: 3,
+  BYTES_4: 4,
+  BYTES_6: 6,
+  BYTES_8: 8,
+  BYTES_12: 12,
+  BYTES_16: 16,
+  BYTES_24: 24,
 };
 
 /**
@@ -101,6 +145,86 @@ function assertPacketLength(name, value) {
   if (!Number.isInteger(value) || value < 1 || value > 255) {
     throw new Error(`${name} must be an integer between 1 and 255`);
   }
+}
+
+/**
+ * @param {string} name
+ * @param {number} value
+ * @returns {void}
+ */
+function assertSyncMode(name, value) {
+  if (!Number.isInteger(value) || value < 0 || value > 7) {
+    throw new Error(`${name} must be an integer between 0 and 7`);
+  }
+}
+
+/**
+ * @param {string} name
+ * @param {number} value
+ * @returns {void}
+ */
+function assertSyncWord(name, value) {
+  if (!Number.isInteger(value) || value < 0 || value > 0xffff) {
+    throw new Error(`${name} must be an integer between 0 and 65535`);
+  }
+}
+
+/**
+ * @param {number} bytes
+ * @returns {number}
+ */
+function resolvePreambleCode(bytes) {
+  const mapping = {
+    2: 0,
+    3: 1,
+    4: 2,
+    6: 3,
+    8: 4,
+    12: 5,
+    16: 6,
+    24: 7,
+  };
+
+  if (!(bytes in mapping)) {
+    throw new Error(`Unsupported preambleBytes: ${bytes}`);
+  }
+
+  return mapping[bytes];
+}
+
+/**
+ * @param {PacketAddressCheck | undefined} mode
+ * @returns {number}
+ */
+function resolveAddressCheck(mode) {
+  const mapping = {
+    [PACKET_ADDRESS_CHECK.NONE]: VALUE.PKTCTRL1.NO_ADDRESS_CHECK,
+    [PACKET_ADDRESS_CHECK.ADDRESS]: VALUE.PKTCTRL1.ADDRESS_CHECK_NO_BROADCAST,
+    [PACKET_ADDRESS_CHECK.ADDRESS_0_BROADCAST]: VALUE.PKTCTRL1.ADDRESS_CHECK_0_BROADCAST,
+    [PACKET_ADDRESS_CHECK.ADDRESS_0_255_BROADCAST]: VALUE.PKTCTRL1.ADDRESS_CHECK_0_255_BROADCAST,
+  };
+
+  return mapping[mode ?? PACKET_ADDRESS_CHECK.NONE];
+}
+
+/**
+ * @param {Modulation} modulation
+ * @returns {number}
+ */
+function resolvePacketModulationBits(modulation) {
+  if (modulation === MODULATION.FSK || modulation === MODULATION.GFSK) return 0x10;
+  if (modulation === MODULATION.TWO_FSK) return 0x00;
+  if (modulation === MODULATION.MSK) return 0x70;
+  if (modulation === MODULATION.OOK) return 0x30;
+  throw new Error(`Unsupported modulation: ${modulation}`);
+}
+
+/**
+ * @param {Modulation} modulation
+ * @returns {number}
+ */
+function getDefaultPacketSyncMode(modulation) {
+  return modulation === MODULATION.OOK ? PACKET_SYNC_MODE.NONE : PACKET_SYNC_MODE.SYNC_16_16;
 }
 
 /**
@@ -180,15 +304,39 @@ function getPacketPreset({
 } = {}) {
   const common = getCommonPreset({ band });
 
-  if (modulation === MODULATION.FSK) {
+  if (modulation === MODULATION.FSK || modulation === MODULATION.GFSK) {
     return {
       ...common,
       [REG.MDMCFG4]: 0xca,
       [REG.MDMCFG3]: 0x83,
-      [REG.MDMCFG2]: VALUE.MDMCFG2.FSK_PACKET,
+      [REG.MDMCFG2]: VALUE.MDMCFG2.GFSK_PACKET,
       [REG.MDMCFG1]: 0x22,
       [REG.MDMCFG0]: 0xf8,
       [REG.DEVIATN]: 0x15,
+    };
+  }
+
+  if (modulation === MODULATION.TWO_FSK) {
+    return {
+      ...common,
+      [REG.MDMCFG4]: 0xca,
+      [REG.MDMCFG3]: 0x83,
+      [REG.MDMCFG2]: VALUE.MDMCFG2.TWO_FSK_PACKET,
+      [REG.MDMCFG1]: 0x22,
+      [REG.MDMCFG0]: 0xf8,
+      [REG.DEVIATN]: 0x15,
+    };
+  }
+
+  if (modulation === MODULATION.MSK) {
+    return {
+      ...common,
+      [REG.MDMCFG4]: 0xca,
+      [REG.MDMCFG3]: 0x83,
+      [REG.MDMCFG2]: VALUE.MDMCFG2.MSK_PACKET,
+      [REG.MDMCFG1]: 0x22,
+      [REG.MDMCFG0]: 0xf8,
+      [REG.DEVIATN]: 0x00,
     };
   }
 
@@ -351,6 +499,46 @@ function validateRadioConfig(options = {}) {
     assertByte("packet.control1", Number(packet.control1));
   }
 
+  if (packet.crc !== undefined && typeof packet.crc !== "boolean") {
+    throw new Error("packet.crc must be a boolean");
+  }
+
+  if (packet.whitening !== undefined && typeof packet.whitening !== "boolean") {
+    throw new Error("packet.whitening must be a boolean");
+  }
+
+  if (packet.fec !== undefined && typeof packet.fec !== "boolean") {
+    throw new Error("packet.fec must be a boolean");
+  }
+
+  if (packet.addressCheck !== undefined) {
+    assertEnumValue("packet.addressCheck", packet.addressCheck, Object.values(PACKET_ADDRESS_CHECK));
+  }
+
+  if (packet.address !== undefined) {
+    assertByte("packet.address", Number(packet.address));
+  }
+
+  if (packet.syncMode !== undefined) {
+    assertSyncMode("packet.syncMode", Number(packet.syncMode));
+  }
+
+  if (packet.syncWord !== undefined) {
+    if (Array.isArray(packet.syncWord)) {
+      if (packet.syncWord.length !== 2) {
+        throw new Error("packet.syncWord array must have exactly two bytes");
+      }
+      assertByte("packet.syncWord[0]", Number(packet.syncWord[0]));
+      assertByte("packet.syncWord[1]", Number(packet.syncWord[1]));
+    } else {
+      assertSyncWord("packet.syncWord", Number(packet.syncWord));
+    }
+  }
+
+  if (packet.preambleBytes !== undefined) {
+    resolvePreambleCode(Number(packet.preambleBytes));
+  }
+
   if (agcCtrl2 !== undefined) {
     assertByte("agcCtrl2", Number(agcCtrl2));
   }
@@ -362,6 +550,38 @@ function validateRadioConfig(options = {}) {
 
     if (packet.lengthMode !== undefined) {
       throw new Error("packet.lengthMode is not supported in direct_async mode");
+    }
+
+    if (packet.crc !== undefined) {
+      throw new Error("packet.crc is not supported in direct_async mode");
+    }
+
+    if (packet.whitening !== undefined) {
+      throw new Error("packet.whitening is not supported in direct_async mode");
+    }
+
+    if (packet.fec !== undefined) {
+      throw new Error("packet.fec is not supported in direct_async mode");
+    }
+
+    if (packet.addressCheck !== undefined) {
+      throw new Error("packet.addressCheck is not supported in direct_async mode");
+    }
+
+    if (packet.address !== undefined) {
+      throw new Error("packet.address is not used in direct_async mode");
+    }
+
+    if (packet.syncMode !== undefined) {
+      throw new Error("packet.syncMode is not supported in direct_async mode");
+    }
+
+    if (packet.syncWord !== undefined) {
+      throw new Error("packet.syncWord is not supported in direct_async mode");
+    }
+
+    if (packet.preambleBytes !== undefined) {
+      throw new Error("packet.preambleBytes is not supported in direct_async mode");
     }
   }
 
@@ -425,20 +645,44 @@ function buildRadioConfig(options = {}) {
   const registers = {};
 
   if (mode === RADIO_MODE.PACKET) {
+    const crcEnabled = packet.crc ?? true;
+    const whiteningEnabled = packet.whitening ?? false;
+    const lengthMode = packet.lengthMode ?? PACKET_LENGTH_MODE.VARIABLE;
+    const appendStatus = packet.appendStatus ?? true;
+    const syncMode = packet.syncMode ?? getDefaultPacketSyncMode(modulation);
+    const preambleCode = resolvePreambleCode(Number(packet.preambleBytes ?? PREAMBLE_BYTES.BYTES_4));
+
     if (packet.length !== undefined) {
       registers.PKTLEN = Number(packet.length);
     }
 
-    if (packet.lengthMode === PACKET_LENGTH_MODE.FIXED) {
-      registers.PKTCTRL0 = VALUE.PKTCTRL0.FIXED_LENGTH;
-    } else if (packet.lengthMode === PACKET_LENGTH_MODE.VARIABLE) {
-      registers.PKTCTRL0 = VALUE.PKTCTRL0.VARIABLE_LENGTH_WITH_CRC;
+    const lengthBits = lengthMode === PACKET_LENGTH_MODE.FIXED
+      ? VALUE.PKTCTRL0.FIXED_LENGTH
+      : VALUE.PKTCTRL0.VARIABLE_LENGTH;
+    registers.PKTCTRL0 = (whiteningEnabled ? 0x40 : 0x00) | (crcEnabled ? 0x04 : 0x00) | lengthBits;
+    registers.PKTCTRL1 = (appendStatus ? VALUE.PKTCTRL1.APPEND_STATUS : 0x00) | resolveAddressCheck(packet.addressCheck);
+
+    const lowMdmcfg1Bits = preset[REG.MDMCFG1] & 0x0f;
+    registers.MDMCFG1 = lowMdmcfg1Bits | (packet.fec ? 0x80 : 0x00) | (preambleCode << 4);
+    registers.MDMCFG2 = resolvePacketModulationBits(modulation) | syncMode;
+
+    if (packet.address !== undefined) {
+      registers.ADDR = Number(packet.address);
     }
 
-    if (packet.appendStatus === false) {
-      registers.PKTCTRL1 = VALUE.PKTCTRL1.NO_ADDRESS_CHECK;
-    } else if (packet.appendStatus === true) {
-      registers.PKTCTRL1 = VALUE.PKTCTRL1.APPEND_STATUS;
+    if (packet.syncWord !== undefined) {
+      if (Array.isArray(packet.syncWord)) {
+        registers.SYNC1 = Number(packet.syncWord[0]);
+        registers.SYNC0 = Number(packet.syncWord[1]);
+      } else {
+        const word = Number(packet.syncWord);
+        registers.SYNC1 = (word >> 8) & 0xff;
+        registers.SYNC0 = word & 0xff;
+      }
+    }
+
+    if (packet.control1 !== undefined) {
+      registers.PKTCTRL1 = Number(packet.control1);
     }
 
     if (gpio.gdo0 !== undefined) {
@@ -470,6 +714,9 @@ module.exports = {
   RADIO_MODE,
   GDO_SIGNAL,
   PACKET_LENGTH_MODE,
+  PACKET_ADDRESS_CHECK,
+  PACKET_SYNC_MODE,
+  PREAMBLE_BYTES,
   getBasePreset,
   getCommonPreset,
   getPacketPreset,

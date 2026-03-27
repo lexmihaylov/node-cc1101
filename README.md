@@ -12,6 +12,7 @@ This project has two parts:
 - SPI driver for CC1101 register access, strobes, FIFO RX/TX, and status reads
 - high-level radio configuration with `configureRadio(...)`
 - packet mode helpers for RX/TX
+- packet-engine options for CRC, whitening, FEC, address filtering, sync mode/word, and preamble length
 - direct async mode helpers for raw OOK work
 - raw edge listener for direct async RX
 - raw stream recorder with continuous live preview
@@ -79,6 +80,9 @@ const {
   RADIO_MODE,
   GDO_SIGNAL,
   PACKET_LENGTH_MODE,
+  PACKET_ADDRESS_CHECK,
+  PACKET_SYNC_MODE,
+  PREAMBLE_BYTES,
 } = require("node-cc1101");
 ```
 
@@ -97,11 +101,18 @@ await radio.verifyChip();
 
 await radio.startPacketRx({
   band: BAND.MHZ_433,
-  modulation: MODULATION.OOK,
+  modulation: MODULATION.GFSK,
   mode: RADIO_MODE.PACKET,
   packet: {
-    appendStatus: true,
     lengthMode: PACKET_LENGTH_MODE.VARIABLE,
+    appendStatus: true,
+    crc: true,
+    whitening: false,
+    fec: false,
+    addressCheck: PACKET_ADDRESS_CHECK.NONE,
+    syncMode: PACKET_SYNC_MODE.SYNC_16_16,
+    syncWord: 0xd391,
+    preambleBytes: PREAMBLE_BYTES.BYTES_4,
   },
 });
 
@@ -178,6 +189,7 @@ cc1101> replay /tmp/rf-captures/session-001.json 0 10000 250 10 false
 - `idle`
 
 Supported band values are `315`, `433`, `868`, and `915`.
+Supported modulation values are `ook`, `fsk`, `2fsk`, `gfsk`, and `msk`.
 
 The shell includes a built-in manual:
 
@@ -233,6 +245,8 @@ Detailed shell documentation is available in [SHELL.md](/home/lex/projects/node-
 ## Notes
 
 - packet mode and direct async mode are intentionally separate in the API
+- packet mode now exposes CC1101 packet-engine controls through `packet.*` options:
+  `lengthMode`, `appendStatus`, `crc`, `whitening`, `fec`, `addressCheck`, `address`, `syncMode`, `syncWord`, `preambleBytes`
 - direct async mode in this project is aimed primarily at raw OOK edge work
 - no normalization, snapping, trimming, frame extraction, or protocol decoding is performed in the current shell workflow
 - timing-sensitive replay in Node.js is still subject to Linux scheduling jitter

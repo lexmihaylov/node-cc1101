@@ -96,6 +96,7 @@ cc1101> man replay
 Shows the current mode when called without arguments.
 
 Supported band values are `315`, `433`, `868`, and `915`.
+Supported modulation values are `ook`, `fsk`, `2fsk`, `gfsk`, and `msk`.
 
 Examples:
 
