@@ -63,9 +63,6 @@ Defaults:
 - `connect [bus] [device] [speedHz]`
 - `disconnect`
 - `status`
-- `spectrum [startMHz] [stopMHz] [stepKHz] [dwellMs] [samples]`
-- `spectrum live [startMHz] [stopMHz] [stepKHz] [dwellMs] [samples]`
-- `monitor [freqMHz] [dwellMs] [samples]`
 - `mode [packet|direct_async] [band] [modulation]`
 - `listen [pollMs]`
 - `listen [silenceGapUs] [sampleRateUs]`
@@ -108,66 +105,6 @@ cc1101> mode
 cc1101> mode packet 433 ook
 cc1101> mode direct_async 433 ook
 ```
-
-### `spectrum [startMHz] [stopMHz] [stepKHz] [dwellMs] [samples]`
-
-### `spectrum live [startMHz] [stopMHz] [stepKHz] [dwellMs] [samples]`
-
-Sweeps a frequency range and prints a terminal RSSI spectrum view.
-
-Arguments:
-
-- `startMHz`: sweep start frequency in MHz
-- `stopMHz`: sweep stop frequency in MHz
-- `stepKHz`: frequency step size in kHz, default `50`
-- `dwellMs`: settle time after each retune, default `20`
-- `samples`: number of RSSI reads averaged per point, default `3`
-
-For `spectrum live`, the defaults are tuned for responsiveness instead:
-
-- `stepKHz`: default `100`
-- `dwellMs`: default `2`
-- `samples`: default `1`
-
-If `startMHz` and `stopMHz` are omitted, the shell uses a small default span around the current band:
-
-- `315`: `314-316 MHz`
-- `433`: `433-435 MHz`
-- `868`: `867-869 MHz`
-- `915`: `914-916 MHz`
-
-Examples:
-
-```text
-cc1101> spectrum
-cc1101> spectrum live
-cc1101> spectrum 433.7 434.2 25 25 5
-cc1101> spectrum 868.0 869.0 100 15 2
-```
-
-`spectrum live` repeats the sweep continuously and redraws the terminal with a fixed dBm-scale block graph. It uses a faster scan path than the one-shot sweep, redraws after each measured point, and keeps a short max-hold trace so brief bursts remain visible long enough to spot them. Stop it with `stop` or Ctrl+C.
-
-This is a received-power sweep using RSSI. It is not an IQ capture, waterfall, or protocol decoder.
-
-### `monitor [freqMHz] [dwellMs] [samples]`
-
-Parks on one frequency and shows live RSSI updates on a fixed `-110..-40 dBm` scale.
-
-Arguments:
-
-- `freqMHz`: center frequency in MHz, default is the current band center
-- `dwellMs`: delay between updates, default `5`
-- `samples`: RSSI reads averaged per update, default `1`
-
-Examples:
-
-```text
-cc1101> monitor
-cc1101> monitor 433.92
-cc1101> monitor 433.92 2 1
-```
-
-Use this when you want to visualize very short clicks or verify that the receiver is producing sensible RSSI changes in real time. It is generally more responsive than sweeping a range.
 
 ### `listen [pollMs]`
 

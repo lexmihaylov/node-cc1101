@@ -2,7 +2,7 @@
 
 const spi = require("spi-device");
 const { ACCESS, DEFAULTS, FIFO, REG, STATUS, STROBE, VALUE } = require("./constants.js");
-const { buildRadioConfig, getFrequencyRegisters, RADIO_MODE } = require("./profiles.js");
+const { buildRadioConfig, RADIO_MODE } = require("./profiles.js");
 
 /**
  * @typedef {import("./profiles.js").RadioConfigOptions} RadioConfigOptions
@@ -204,15 +204,6 @@ class CC1101Driver {
     await this.writeRegister(REG.FREQ2, 0x10);
     await this.writeRegister(REG.FREQ1, 0xb0);
     await this.writeRegister(REG.FREQ0, 0x71);
-  }
-
-  /**
-   * @param {number} freqMHz
-   * @returns {Promise<void>}
-   */
-  async setFrequencyMHz(freqMHz) {
-    const registerMap = getFrequencyRegisters(Number(freqMHz));
-    await this.applyRegisters(registerMap);
   }
 
   /** @returns {Promise<ChipInfo>} */

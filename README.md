@@ -17,7 +17,6 @@ This project has two parts:
 - raw edge listener for direct async RX
 - raw stream recorder with continuous live preview
 - raw replay through a Raspberry Pi GPIO driving CC1101 `GDO0` in TX
-- terminal spectrum sweep and live fixed-scale preview using RSSI across a frequency range
 
 ## Requirements
 
@@ -178,9 +177,6 @@ cc1101> replay /tmp/rf-captures/session-001.json 0 10000 250 10 false
 - `disconnect`
 - `man [command]`
 - `status`
-- `spectrum [startMHz] [stopMHz] [stepKHz] [dwellMs] [samples]`
-- `spectrum live [startMHz] [stopMHz] [stepKHz] [dwellMs] [samples]`
-- `monitor [freqMHz] [dwellMs] [samples]`
 - `mode [packet|direct_async] [band] [modulation]`
 - `listen [pollMs]`
 - `listen [silenceGapUs] [sampleRateUs]`
@@ -202,24 +198,6 @@ cc1101> man
 cc1101> man listen
 cc1101> man record
 cc1101> man replay
-cc1101> man spectrum
-```
-
-The `spectrum` command sweeps the radio across a range, samples RSSI at each point, and renders a terminal bar chart. For example:
-
-```text
-cc1101> spectrum
-cc1101> spectrum live
-cc1101> spectrum 433.7 434.2 25 25 5
-```
-
-`spectrum live` continuously redraws the sweep using a fixed dBm-scale block graph that works more reliably across terminals. It uses more aggressive live defaults (`stepKHz=100`, `dwellMs=2`, `samples=1`), updates after each measured point, and keeps a short max-hold trace so brief clicks remain visible momentarily. This is still a received-power sweep view, not an IQ or waterfall analyzer.
-
-For very short bursts, `monitor` is usually a better fit than sweeping because it parks on one frequency and updates RSSI continuously:
-
-```text
-cc1101> monitor
-cc1101> monitor 433.92 2 1
 ```
 
 During `record`, the shell renders a continuously updating sampled live preview over the recent time window and shows raw edge transitions as `level@dtUs`. Every observed edge is recorded; no duration threshold is applied.

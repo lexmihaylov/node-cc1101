@@ -117,66 +117,6 @@ const MANUALS = {
     "  Useful for confirming whether the radio is in IDLE, RX, or TX and whether",
     "  FIFO activity looks sane.",
   ].join("\n"),
-  spectrum: [
-    "NAME",
-    "  spectrum - sweep a frequency range and render RSSI bars",
-    "",
-    "USAGE",
-    "  spectrum [startMHz] [stopMHz] [stepKHz] [dwellMs] [samples]",
-    "  spectrum live [startMHz] [stopMHz] [stepKHz] [dwellMs] [samples]",
-    "",
-    "OPTIONS",
-    "  startMHz",
-    "    Sweep start frequency in MHz. Defaults to a small range around the current band.",
-    "  stopMHz",
-    "    Sweep stop frequency in MHz. Defaults to a small range around the current band.",
-    "  stepKHz",
-    "    Frequency step size in kHz. Default 50.",
-    "  dwellMs",
-    "    Time to wait after each retune before sampling RSSI. Default 20 ms.",
-    "  samples",
-    "    Number of RSSI reads averaged at each point. Default 3.",
-    "",
-    "DESCRIPTION",
-    "  Tunes the radio across the requested range, measures RSSI at each step,",
-    "  and prints a terminal spectrum view using the current band/modulation preset.",
-    "  `spectrum live` repeats that sweep continuously and redraws the terminal",
-    "  using a fixed dBm-scale block graph for terminal compatibility.",
-    "  Live mode defaults to stepKHz=100, dwellMs=2, and samples=1 for faster refresh,",
-    "  updates on each measured point, and keeps a short max-hold trace for brief bursts.",
-    "  This is a received-power sweep, not an IQ or waterfall display.",
-    "",
-    "EXAMPLES",
-    "  spectrum",
-    "  spectrum live",
-    "  spectrum 433.7 434.2 25 25 5",
-    "  spectrum 868.0 869.0 100 15 2",
-  ].join("\n"),
-  monitor: [
-    "NAME",
-    "  monitor - park on one frequency and show live RSSI",
-    "",
-    "USAGE",
-    "  monitor [freqMHz] [dwellMs] [samples]",
-    "",
-    "OPTIONS",
-    "  freqMHz",
-    "    Frequency in MHz. Defaults to the center of the current band preset.",
-    "  dwellMs",
-    "    Delay between RSSI updates. Default 5 ms.",
-    "  samples",
-    "    Number of RSSI reads averaged for each update. Default 1.",
-    "",
-    "DESCRIPTION",
-    "  Keeps the radio parked on one frequency and renders a live RSSI monitor",
-    "  on a fixed -110..-40 dBm scale. This is better than sweeping when you",
-    "  want to visualize very short clicks or verify RSSI behavior in real time.",
-    "",
-    "EXAMPLES",
-    "  monitor",
-    "  monitor 433.92",
-    "  monitor 433.92 2 1",
-  ].join("\n"),
   mode: [
     "NAME",
     "  mode - show or update the shell radio mode configuration",
@@ -409,36 +349,10 @@ function decodeRssi(raw) {
   return (value / 2) - 74;
 }
 
-function getDefaultSpectrumRange(band) {
-  const ranges = {
-    [BAND.MHZ_315]: { startMHz: 314, stopMHz: 316 },
-    [BAND.MHZ_433]: { startMHz: 433.0, stopMHz: 435.0 },
-    [BAND.MHZ_868]: { startMHz: 867.0, stopMHz: 869.0 },
-    [BAND.MHZ_915]: { startMHz: 914.0, stopMHz: 916.0 },
-  };
-
-  return ranges[band] ?? ranges[BAND.MHZ_433];
-}
-
-function getDefaultMonitorFrequency(band) {
-  const centers = {
-    [BAND.MHZ_315]: 315.0,
-    [BAND.MHZ_433]: 433.92,
-    [BAND.MHZ_868]: 868.3,
-    [BAND.MHZ_915]: 915.0,
-  };
-
-  return centers[band] ?? centers[BAND.MHZ_433];
-}
-
 function formatMHz(value, stepKHz = 50) {
   const decimals = stepKHz < 100 ? 3 : stepKHz < 1000 ? 2 : 1;
   return Number(value).toFixed(decimals);
 }
-
-const SPECTRUM_DBM_MIN = -110;
-const SPECTRUM_DBM_MAX = -40;
-const SPECTRUM_DBM_STEP = 10;
 
 function renderSpectrum(points, stepKHz) {
   if (!points.length) return "no spectrum samples";
@@ -470,161 +384,6 @@ function renderSpectrum(points, stepKHz) {
     "strongest peaks:",
     ...peaks,
   ].join("\n");
-}
-
-function sampleSpectrumPoints(points, targetCount) {
-  if (!points.length || targetCount <= 0) {
-    return [];
-  }
-
-  const sampled = [];
-  if (points.length === 1) {
-    for (let index = 0; index < targetCount; index += 1) {
-      sampled.push(points[0].rssiDbm);
-    }
-    return sampled;
-  }
-
-  for (let index = 0; index < targetCount; index += 1) {
-    const sourceIndex = Math.round(index * (points.length - 1) / Math.max(targetCount - 1, 1));
-    sampled.push(points[sourceIndex].rssiDbm);
-  }
-  return sampled;
-}
-
-function clampDbm(value) {
-  return Math.max(SPECTRUM_DBM_MIN, Math.min(SPECTRUM_DBM_MAX, value));
-}
-
-function buildSpectrumColumns(values, width, fillChar = "█") {
-  const sampled = sampleSpectrumPoints(values.map((value) => ({ rssiDbm: clampDbm(value) })), width);
-  const rows = [];
-
-  for (let threshold = SPECTRUM_DBM_MAX; threshold >= SPECTRUM_DBM_MIN; threshold -= SPECTRUM_DBM_STEP) {
-    const line = sampled.map((value) => (value >= threshold ? fillChar : " "));
-    rows.push(`${String(threshold).padStart(4, " ")} ${line.join("")}`);
-  }
-
-  return rows;
-}
-
-function renderMonitorBar(rssiDbm, width = 64, fillChar = "#") {
-  const clamped = clampDbm(rssiDbm);
-  const ratio = (clamped - SPECTRUM_DBM_MIN) / (SPECTRUM_DBM_MAX - SPECTRUM_DBM_MIN);
-  const filled = Math.max(0, Math.min(width, Math.round(ratio * width)));
-  return `${fillChar.repeat(filled)}${" ".repeat(Math.max(width - filled, 0))}`;
-}
-
-function renderMonitorHistory(history, width = 64) {
-  const levels = " .:-=+*#%@";
-  const sampled = sampleSpectrumPoints(history.map((value) => ({ rssiDbm: clampDbm(value) })), width);
-  return sampled.map((value) => {
-    const ratio = (clampDbm(value) - SPECTRUM_DBM_MIN) / (SPECTRUM_DBM_MAX - SPECTRUM_DBM_MIN);
-    const index = Math.max(0, Math.min(levels.length - 1, Math.round(ratio * (levels.length - 1))));
-    return levels[index];
-  }).join("");
-}
-
-function renderBlockSpectrumPreview(points, stepKHz, sweepCount, pointIndex, totalPoints, holdValues = []) {
-  const presentPoints = points.filter((point) => point && Number.isFinite(point.rssiDbm));
-  if (!presentPoints.length) return "no spectrum samples";
-
-  const values = presentPoints.map((point) => point.rssiDbm);
-  const peak = Math.max(...values);
-  const floor = Math.min(...values);
-
-  const liveValues = points.map((point) => (
-    point && Number.isFinite(point.rssiDbm) ? point.rssiDbm : SPECTRUM_DBM_MIN
-  ));
-  const liveRows = buildSpectrumColumns(liveValues, 64, "█");
-  const holdRows = holdValues.length ? buildSpectrumColumns(holdValues, 64, "·") : [];
-
-  const strongest = [...presentPoints]
-    .sort((left, right) => right.rssiDbm - left.rssiDbm)
-    .slice(0, Math.min(3, presentPoints.length))
-    .map((point, index) => `${index + 1}. ${formatMHz(point.freqMHz, stepKHz)} MHz ${point.rssiDbm.toFixed(1)} dBm`);
-
-  return [
-    `${COLOR.cyan}spectrum${COLOR.reset} ${COLOR.dim}| live preview${COLOR.reset}  sweeps=${sweepCount}  point=${pointIndex}/${totalPoints}`,
-    `${COLOR.blue}range${COLOR.reset}=${formatMHz(points[0].freqMHz, stepKHz)}-${formatMHz(points[points.length - 1].freqMHz, stepKHz)} MHz  ` +
-      `${COLOR.blue}scale${COLOR.reset}=${SPECTRUM_DBM_MIN}..${SPECTRUM_DBM_MAX} dBm  ` +
-      `${COLOR.blue}floor${COLOR.reset}=${floor.toFixed(1)} dBm  ${COLOR.blue}peak${COLOR.reset}=${peak.toFixed(1)} dBm`,
-    `${COLOR.dim}solid blocks=live  dots=short max-hold  Ctrl+C or 'stop' ends live spectrum mode${COLOR.reset}`,
-    "",
-    ...liveRows,
-    ...(holdRows.length ? holdRows.map((line) => `${COLOR.dim}${line}${COLOR.reset}`) : []),
-    `     ${formatMHz(points[0].freqMHz, stepKHz)} MHz${" ".repeat(40)}${formatMHz(points[points.length - 1].freqMHz, stepKHz)} MHz`,
-    "",
-    "strongest peaks:",
-    ...strongest,
-  ].join("\n");
-}
-
-function normalizeSpectrumArgs(startMHz, stopMHz, stepKHz, dwellMs, samples, band) {
-  const defaults = getDefaultSpectrumRange(band);
-  const start = Number(startMHz ?? defaults.startMHz);
-  const stop = Number(stopMHz ?? defaults.stopMHz);
-  const step = Number(stepKHz ?? 50);
-  const dwell = Number(dwellMs ?? 20);
-  const sampleCount = Number(samples ?? 3);
-
-  if (!Number.isFinite(start) || !Number.isFinite(stop)) {
-    throw new Error("spectrum frequencies must be valid MHz numbers");
-  }
-  if (!Number.isFinite(step) || step <= 0) {
-    throw new Error("spectrum stepKHz must be greater than 0");
-  }
-  if (!Number.isFinite(dwell) || dwell < 0) {
-    throw new Error("spectrum dwellMs must be 0 or greater");
-  }
-  if (!Number.isInteger(sampleCount) || sampleCount < 1) {
-    throw new Error("spectrum samples must be an integer greater than 0");
-  }
-  if (stop < start) {
-    throw new Error("spectrum stopMHz must be greater than or equal to startMHz");
-  }
-
-  return {
-    startMHz: start,
-    stopMHz: stop,
-    stepKHz: step,
-    dwellMs: dwell,
-    samples: sampleCount,
-    stepMHz: step / 1000,
-  };
-}
-
-function normalizeLiveSpectrumArgs(startMHz, stopMHz, stepKHz, dwellMs, samples, band) {
-  return normalizeSpectrumArgs(
-    startMHz,
-    stopMHz,
-    stepKHz ?? 100,
-    dwellMs ?? 2,
-    samples ?? 1,
-    band
-  );
-}
-
-function normalizeMonitorArgs(freqMHz, dwellMs, samples, band) {
-  const frequency = Number(freqMHz ?? getDefaultMonitorFrequency(band));
-  const dwell = Number(dwellMs ?? 5);
-  const sampleCount = Number(samples ?? 1);
-
-  if (!Number.isFinite(frequency)) {
-    throw new Error("monitor frequency must be a valid MHz number");
-  }
-  if (!Number.isFinite(dwell) || dwell < 0) {
-    throw new Error("monitor dwellMs must be 0 or greater");
-  }
-  if (!Number.isInteger(sampleCount) || sampleCount < 1) {
-    throw new Error("monitor samples must be an integer greater than 0");
-  }
-
-  return {
-    freqMHz: frequency,
-    dwellMs: dwell,
-    samples: sampleCount,
-  };
 }
 
 function parseLine(line) {
@@ -744,9 +503,6 @@ class RadioShell {
     console.log("  connect [bus] [device] [speedHz]");
     console.log("  disconnect");
     console.log("  status");
-    console.log("  spectrum [startMHz] [stopMHz] [stepKHz] [dwellMs] [samples]");
-    console.log("  spectrum live [startMHz] [stopMHz] [stepKHz] [dwellMs] [samples]");
-    console.log("  monitor [freqMHz] [dwellMs] [samples]");
     console.log("  mode [packet|direct_async] [band] [modulation]");
     console.log("  listen [pollMs]");
     console.log("  listen [silenceGapUs] [sampleRateUs]");
@@ -762,9 +518,6 @@ class RadioShell {
     console.log("");
     console.log("examples:");
     console.log("  man listen");
-    console.log("  spectrum");
-    console.log("  spectrum live");
-    console.log("  monitor 433.92 2 1");
     console.log("  mode packet 433 ook");
     console.log("  listen 20");
     console.log("  send aa 55 01");
@@ -838,226 +591,6 @@ class RadioShell {
     console.log(`PKTSTATUS: 0x${pktstatus.toString(16).padStart(2, "0")}`);
     console.log(`RXBYTES  : ${rxbytes & 0x7f}`);
     console.log(`TXBYTES  : ${txbytes & 0x7f}`);
-  }
-
-  async spectrum(startMHz, stopMHz, stepKHz = 50, dwellMs = 20, samples = 3) {
-    await this.ensureConnected();
-    await this.stop();
-    const config = normalizeSpectrumArgs(
-      startMHz,
-      stopMHz,
-      stepKHz,
-      dwellMs,
-      samples,
-      this.radioConfig.band
-    );
-    const points = await this.collectSpectrumSweep(config);
-    await this.radio.idle();
-    console.log(renderSpectrum(points, config.stepKHz));
-  }
-
-  async prepareSpectrumSweep() {
-    await this.radio.configureRadio({
-      ...this.radioConfig,
-      mode: RADIO_MODE.PACKET,
-      packet: {
-        appendStatus: false,
-        lengthMode: PACKET_LENGTH_MODE.FIXED,
-        length: 1,
-      },
-    });
-  }
-
-  async readSpectrumRssi(sampleCount, fastMode = false) {
-    let rssiTotal = 0;
-    for (let i = 0; i < sampleCount; i += 1) {
-      const rssiRaw = fastMode
-        ? await this.radio.getRssi()
-        : await stableRead(this.radio, STATUS.RSSI);
-      rssiTotal += decodeRssi(rssiRaw);
-      if (i + 1 < sampleCount) {
-        await sleep(fastMode ? 1 : 2);
-      }
-    }
-
-    return rssiTotal / sampleCount;
-  }
-
-  async collectSpectrumSweep(config, options = {}) {
-    const fastMode = Boolean(options.fastMode);
-    const reconfigure = options.reconfigure !== false;
-    /** @type {{ freqMHz: number, rssiDbm: number }[]} */
-    const points = [];
-
-    if (reconfigure) {
-      await this.prepareSpectrumSweep();
-    }
-
-    if (fastMode) {
-      await this.radio.enterRxSafe();
-    }
-
-    for (
-      let freqMHz = config.startMHz;
-      freqMHz <= config.stopMHz + (config.stepMHz / 2);
-      freqMHz += config.stepMHz
-    ) {
-      const roundedFreqMHz = Number(freqMHz.toFixed(6));
-      await this.radio.setFrequencyMHz(roundedFreqMHz);
-
-      if (fastMode) {
-        await this.radio.enterRx();
-      } else {
-        await this.radio.enterRxSafe();
-      }
-
-      if (config.dwellMs > 0) {
-        await sleep(config.dwellMs);
-      }
-
-      points.push({
-        freqMHz: roundedFreqMHz,
-        rssiDbm: await this.readSpectrumRssi(config.samples, fastMode),
-      });
-    }
-
-    return points;
-  }
-
-  decaySpectrumHold(holdValues, amountDb = 3) {
-    for (let i = 0; i < holdValues.length; i += 1) {
-      if (!Number.isFinite(holdValues[i])) continue;
-      holdValues[i] -= amountDb;
-    }
-  }
-
-  async spectrumLive(startMHz, stopMHz, stepKHz = 50, dwellMs = 20, samples = 3) {
-    await this.ensureConnected();
-    await this.stop();
-
-    const config = normalizeLiveSpectrumArgs(
-      startMHz,
-      stopMHz,
-      stepKHz,
-      dwellMs,
-      samples,
-      this.radioConfig.band
-    );
-
-    const runtime = {
-      active: true,
-      stop: async () => {
-        runtime.active = false;
-        if (this.radio) {
-          await this.radio.idle().catch(() => {});
-        }
-      },
-    };
-
-    this.runtime = runtime;
-    let sweepCount = 0;
-    await this.prepareSpectrumSweep();
-    const totalPoints = Math.floor(((config.stopMHz - config.startMHz) / config.stepMHz) + 1.5);
-    /** @type {(null | { freqMHz: number, rssiDbm: number })[]} */
-    const previewPoints = [];
-    /** @type {number[]} */
-    const holdValues = [];
-    for (let i = 0; i < totalPoints; i += 1) {
-      const freqMHz = Number((config.startMHz + (config.stepMHz * i)).toFixed(6));
-      previewPoints.push({ freqMHz, rssiDbm: -120 });
-      holdValues.push(-120);
-    }
-
-    while (runtime.active) {
-      sweepCount += 1;
-      this.decaySpectrumHold(holdValues, 4);
-
-      for (let pointIndex = 0; pointIndex < totalPoints; pointIndex += 1) {
-        if (!runtime.active) break;
-
-        const freqMHz = Number((config.startMHz + (config.stepMHz * pointIndex)).toFixed(6));
-        await this.radio.setFrequencyMHz(freqMHz);
-        await this.radio.enterRx();
-
-        if (config.dwellMs > 0) {
-          await sleep(config.dwellMs);
-        }
-
-        const rssiDbm = await this.readSpectrumRssi(config.samples, true);
-        previewPoints[pointIndex] = { freqMHz, rssiDbm };
-        holdValues[pointIndex] = Math.max(holdValues[pointIndex], rssiDbm);
-
-        process.stdout.write("\u001b[2J\u001b[H");
-        process.stdout.write(`${renderBlockSpectrumPreview(
-          previewPoints,
-          config.stepKHz,
-          sweepCount,
-          pointIndex + 1,
-          totalPoints,
-          holdValues
-        )}\n`);
-      }
-    }
-  }
-
-  async monitor(freqMHz, dwellMs = 5, samples = 1) {
-    await this.ensureConnected();
-    await this.stop();
-
-    const config = normalizeMonitorArgs(
-      freqMHz,
-      dwellMs,
-      samples,
-      this.radioConfig.band
-    );
-
-    const runtime = {
-      active: true,
-      stop: async () => {
-        runtime.active = false;
-        if (this.radio) {
-          await this.radio.idle().catch(() => {});
-        }
-      },
-    };
-
-    this.runtime = runtime;
-    await this.prepareSpectrumSweep();
-    await this.radio.setFrequencyMHz(config.freqMHz);
-    await this.radio.enterRxSafe();
-
-    const history = [];
-    let peakDbm = SPECTRUM_DBM_MIN;
-    let updates = 0;
-
-    while (runtime.active) {
-      if (config.dwellMs > 0) {
-        await sleep(config.dwellMs);
-      }
-
-      const rssiDbm = await this.readSpectrumRssi(config.samples, true);
-      updates += 1;
-      peakDbm = Math.max(peakDbm, rssiDbm);
-      history.push(rssiDbm);
-      if (history.length > 256) {
-        history.shift();
-      }
-
-      process.stdout.write("\u001b[2J\u001b[H");
-      process.stdout.write([
-        `${COLOR.cyan}monitor${COLOR.reset} ${COLOR.dim}| parked RSSI${COLOR.reset}  updates=${updates}`,
-        `${COLOR.blue}freq${COLOR.reset}=${formatMHz(config.freqMHz, 10)} MHz  ${COLOR.blue}scale${COLOR.reset}=${SPECTRUM_DBM_MIN}..${SPECTRUM_DBM_MAX} dBm`,
-        `${COLOR.blue}current${COLOR.reset}=${rssiDbm.toFixed(1)} dBm  ${COLOR.blue}peak${COLOR.reset}=${peakDbm.toFixed(1)} dBm`,
-        `${COLOR.dim}Ctrl+C or 'stop' ends monitor mode${COLOR.reset}`,
-        "",
-        `${SPECTRUM_DBM_MAX.toString().padStart(4, " ")} ${renderMonitorBar(rssiDbm, 64, "#")}`,
-        `${" ".repeat(5)}${renderMonitorBar(peakDbm, 64, ".")}`,
-        `${SPECTRUM_DBM_MIN.toString().padStart(4, " ")}`,
-        "",
-        `hist ${renderMonitorHistory(history, 64)}`,
-      ].join("\n"));
-      process.stdout.write("\n");
-    }
   }
 
   async startPacketListen(pollMs = 20) {
@@ -1285,14 +818,6 @@ async function executeCommand(shell, line, onExit) {
     console.log("disconnected");
   } else if (command === "status") {
     await shell.printStatus();
-  } else if (command === "spectrum") {
-    if (subcommand === "live") {
-      await shell.spectrumLive(rest[0], rest[1], rest[2], rest[3], rest[4]);
-    } else {
-      await shell.spectrum(subcommand, rest[0], rest[1], rest[2], rest[3]);
-    }
-  } else if (command === "monitor") {
-    await shell.monitor(subcommand, rest[0], rest[1]);
   } else if (command === "mode") {
     if (!subcommand) {
       shell.printMode();
