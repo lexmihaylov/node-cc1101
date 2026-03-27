@@ -43,7 +43,14 @@ function parseLine(line) {
 
 class RadioShell {
   /**
-   * @param {{ bus?: number, device?: number, speedHz?: number, commandRegistry?: CommandRegistry }=} options
+   * @param {{
+   *   bus?: number,
+   *   device?: number,
+   *   speedHz?: number,
+   *   commandRegistry?: CommandRegistry,
+   *   clearTerminal?: () => void,
+   *   renderFrame?: (frame: string) => void,
+   * }=} options
    */
   constructor(options = {}) {
     this.bus = options.bus ?? appConfig.spi.bus;
@@ -54,6 +61,12 @@ class RadioShell {
     this.listening = false;
     this.runtime = null;
     this.radioConfig = createDefaultRadioConfig();
+    this.clearTerminal = options.clearTerminal ?? (() => {
+      process.stdout.write("\u001bc");
+    });
+    this.renderFrame = options.renderFrame ?? ((frame) => {
+      process.stdout.write(frame);
+    });
   }
 
   async ensureConnected() {
@@ -274,4 +287,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { RadioShell };
+module.exports = { RadioShell, executeCommand };

@@ -13,7 +13,7 @@ module.exports = {
     "USAGE",
     "  clear",
   ].join("\n"),
-  async execute() {
-    process.stdout.write("\u001bc");
+  async execute({ shell }) {
+    shell.clearTerminal();
   },
 };

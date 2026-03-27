@@ -77,16 +77,25 @@ class CC1101RawListener {
     this.state = "silence";
   }
 
+  /**
+   * @param {RawListenerState} nextState
+   * @returns {void}
+   */
   setState(nextState) {
     if (this.state === nextState) return;
     this.state = nextState;
     this.options.onStateChange(nextState);
   }
 
+  /** @returns {void} */
   resetFrameBuffer() {
     this.frameBuffer = [];
   }
 
+  /**
+   * @param {string} reason
+   * @returns {void}
+   */
   emitFrame(reason) {
     if (this.frameBuffer.length === 0) {
       this.resetFrameBuffer();
@@ -106,6 +115,11 @@ class CC1101RawListener {
     this.resetFrameBuffer();
   }
 
+  /**
+   * @param {number} level
+   * @param {number} tick
+   * @returns {void}
+   */
   handleAlert(level, tick) {
     if (this.stopping) {
       this.lastTick = tick;
@@ -138,6 +152,7 @@ class CC1101RawListener {
     this.frameBuffer.push({ level, dtUs });
   }
 
+  /** @returns {Promise<void>} */
   async start() {
     if (this.loopPromise) return;
 
@@ -179,6 +194,7 @@ class CC1101RawListener {
     });
   }
 
+  /** @returns {Promise<void>} */
   async runLoop() {
     while (!this.stopping) {
       const nowUs = Date.now() * 1000;
@@ -196,6 +212,7 @@ class CC1101RawListener {
     }
   }
 
+  /** @returns {Promise<void>} */
   async stop() {
     this.stopping = true;
 

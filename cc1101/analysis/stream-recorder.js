@@ -125,6 +125,7 @@ class CC1101StreamRecorder {
     ].join("\n");
   }
 
+  /** @returns {void} */
   emitPreview() {
     const now = Date.now();
     const recent = this.edges.filter((edge) => edge.wallclockMs >= now - this.options.previewWindowMs);
@@ -146,6 +147,11 @@ class CC1101StreamRecorder {
     this.options.onPreview(lines.join("\n"));
   }
 
+  /**
+   * @param {number} level
+   * @param {number} tick
+   * @returns {void}
+   */
   handleAlert(level, tick) {
     if (this.stopping) {
       this.lastTick = tick;
@@ -175,6 +181,7 @@ class CC1101StreamRecorder {
     });
   }
 
+  /** @returns {Promise<void>} */
   async start() {
     if (this.radio) return;
 

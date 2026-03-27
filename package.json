@@ -9,12 +9,14 @@
   "files": [
     "index.js",
     "radio-shell.js",
+    "radio-tui.js",
     "commands",
     "cc1101"
   ],
   "scripts": {
     "shell": "node radio-shell.js",
-    "check": "node --check index.js && node --check radio-shell.js && find cc1101 commands -name '*.js' -print0 | xargs -0 -n1 node --check"
+    "tui": "node radio-tui.js",
+    "check": "node --check index.js && node --check radio-shell.js && node --check radio-tui.js && find cc1101 commands -name '*.js' -print0 | xargs -0 -n1 node --check"
   },
   "keywords": [
     "cc1101",
@@ -30,6 +32,7 @@
     "node": ">=18"
   },
   "dependencies": {
+    "@blessed/neo-blessed": "^1.0.0",
     "pigpio": "^3.3.1",
     "spi-device": "^3.1.2"
   }
